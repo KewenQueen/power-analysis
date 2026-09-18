@@ -162,7 +162,7 @@
                   其它
                 </div>
                 <ul class="mt-1 space-y-1 text-slate-700 leading-6 list-disc list-inside text-sm">
-                  <li>「<strong>历史操作记录</strong>」缓存在本机浏览器，可回溯或手动清空</li>
+                  <li>「<strong>历史操作记录</strong>」与当前账号绑定并同步至云端；大体积结果缓存仅保留在本机</li>
                   <li>右上「<strong>管理员模式</strong>」可上传 / 替换 / 删除 / 重命名项目模板，操作对<strong>所有成员生效</strong></li>
                 </ul>
               </div>
@@ -204,7 +204,7 @@
           <div class="mt-2 admin-only-hidden">
             <div class="rounded-xl bg-amber-50 border border-amber-200 px-3 py-1.5 text-[11px] text-amber-800 leading-snug">
               <span class="material-symbols-outlined align-middle text-amber-600 text-sm mr-0.5">info</span>
-              普通用户仅可选择或下载模板；上传 / 删除请先"管理员登录"。
+              普通用户仅可选择或下载模板；上传 / 删除仅对管理员邮箱账号开放。
             </div>
           </div>
 
@@ -534,7 +534,7 @@
         <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h2 class="text-2xl font-bold text-slate-900">历史操作记录</h2>
-            <p class="mt-2 text-slate-600">每次导出 XLSX 都会自动留痕，记录保存在浏览器本地。</p>
+            <p class="mt-2 text-slate-600">每次导出 XLSX 都会自动留痕，并按当前账号同步到云端。</p>
           </div>
           <div class="flex items-center gap-3 flex-wrap">
             <button id="clearHistoryCacheBtn" class="template-btn template-btn-secondary" disabled>清理历史缓存</button>
