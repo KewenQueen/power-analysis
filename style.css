@@ -1604,3 +1604,10 @@ body.col-resizing {
   .auth-card h1 { font-size: 26px; }
   .user-email { display: none; }
 }
+
+.auth-divider { display: flex; align-items: center; gap: 12px; margin: 18px 0 14px; color: #94a3b8; font-size: 12px; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+.auth-guest { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid #cbd5e1; border-radius: 14px; padding: 12px; color: #334155; background: rgba(255,255,255,.86); font-weight: 800; cursor: pointer; transition: border-color .2s ease, background .2s ease, transform .2s ease; }
+.auth-guest:hover { border-color: #818cf8; background: #f8faff; transform: translateY(-1px); }
+.auth-guest .material-symbols-outlined { font-size: 19px; }
+.auth-guest-note { margin: 10px 0 0; color: #64748b; font-size: 12px; line-height: 1.6; text-align: center; }

@@ -8,6 +8,26 @@ async function getSupabaseClient() {
   return client;
 }
 
+const GUEST_TEMPLATE_ID = 'guest_builtin_template';
+function isGuestMode() {
+  return Boolean(window.powerAuth && window.powerAuth.isGuest && window.powerAuth.isGuest());
+}
+function getGuestTemplateRecord() {
+  return {
+    id: GUEST_TEMPLATE_ID,
+    name: '内置示例模板',
+    project: '游客体验',
+    fileName: 'template.xlsx',
+    sizeBytes: 0,
+    version: 1,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    createdBy: 'system',
+    updatedBy: 'system',
+    data: {},
+  };
+}
+
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   const chunkSize = 0x8000;
@@ -44,18 +64,29 @@ function normalizeTemplateRow(rec) {
 
 const templateApi = {
   async list() {
+    if (isGuestMode()) return [getGuestTemplateRecord()];
     const client = await getSupabaseClient();
     const { data, error } = await client.from('templates').select('*').order('created_at', { ascending: false });
     if (error) throw error;
     return (data || []).map(normalizeTemplateRow);
   },
   async get(id) {
+    if (isGuestMode()) {
+      if (id !== GUEST_TEMPLATE_ID) throw new Error('游客无法查看团队模板');
+      return getGuestTemplateRecord();
+    }
     const client = await getSupabaseClient();
     const { data, error } = await client.from('templates').select('*').eq('id', id).single();
     if (error) throw error;
     return normalizeTemplateRow(data);
   },
   async download(id) {
+    if (isGuestMode()) {
+      if (id !== GUEST_TEMPLATE_ID) throw new Error('游客无法查看团队模板');
+      const response = await fetch('./template.xlsx', { cache: 'force-cache' });
+      if (!response.ok) throw new Error('内置模板加载失败');
+      return { buffer: await response.arrayBuffer(), version: 1, updatedAt: null, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+    }
     const record = await this.get(id);
     const base64 = record.data && record.data.base64;
     if (!base64) throw new Error('模板文件内容为空');
@@ -812,6 +843,24 @@ async function loadHistoryFromCloud() {
 }
 
 async function addHistoryEntry(entry) {
+  if (isGuestMode()) {
+    const record = {
+      id: entry.historyStoreId || entry.id || crypto.randomUUID(),
+      time: Date.now(),
+      action: entry.action || '导出',
+      fileName: entry.fileName || '',
+      projectName: entry.projectName || '游客体验',
+      rowCount: Number(entry.rowCount || 0),
+      colCount: Number(entry.colCount || 0),
+      datasetCount: entry.datasetCount || 0,
+      historyStoreId: entry.historyStoreId || '',
+      historyCacheSummary: entry.historyCacheSummary || '仅保存在当前设备，不会同步公共数据。',
+    };
+    state.historyItems.unshift(record);
+    if (state.historyItems.length > HISTORY_MAX) state.historyItems.length = HISTORY_MAX;
+    renderHistory();
+    return record;
+  }
   const client = await getSupabaseClient();
   const user = window.powerAuth.getUser();
   const payload = {
@@ -844,9 +893,11 @@ async function addHistoryEntry(entry) {
 
 async function deleteHistoryEntry(id) {
   const item = getHistory().find((record) => record.id === id);
-  const client = await getSupabaseClient();
-  const { error } = await client.from('history').delete().eq('id', id);
-  if (error) throw error;
+  if (!isGuestMode()) {
+    const client = await getSupabaseClient();
+    const { error } = await client.from('history').delete().eq('id', id);
+    if (error) throw error;
+  }
   state.historyItems = getHistory().filter((record) => record.id !== id);
   if (item && item.historyStoreId) {
     try { await deleteHistoryEntryCache(item.historyStoreId); }
@@ -858,10 +909,12 @@ async function deleteHistoryEntry(id) {
 async function clearHistory() {
   if (!getHistory().length) return;
   if (!confirm('确定要清空全部历史操作记录和缓存结果吗？该操作不可恢复。')) return;
-  const client = await getSupabaseClient();
-  const user = window.powerAuth.getUser();
-  const { error } = await client.from('history').delete().eq('user_id', user.id);
-  if (error) throw error;
+  if (!isGuestMode()) {
+    const client = await getSupabaseClient();
+    const user = window.powerAuth.getUser();
+    const { error } = await client.from('history').delete().eq('user_id', user.id);
+    if (error) throw error;
+  }
   state.historyItems = [];
   try {
     await clearAllHistoryEntries();
@@ -5281,12 +5334,35 @@ renderHistory();
 
 window.addEventListener('power-auth-change', async (event) => {
   const detail = event.detail || {};
-  state.serverUser = detail.user ? { username: detail.user.email, email: detail.user.email, id: detail.user.id } : null;
+  state.serverUser = detail.user
+    ? { username: detail.user.email, email: detail.user.email, id: detail.user.id }
+    : (detail.guest ? { username: 'guest', email: '', id: '' } : null);
   setAdminMode(Boolean(detail.isAdmin));
+
+  if (detail.guest) {
+    state.templateItems = [];
+    state.historyItems = [];
+    state.activeProject = null;
+    state.datasets.forEach((dataset) => {
+      dataset.projectId = null;
+      dataset.projectName = '';
+    });
+    try {
+      await refreshTemplateList();
+      if (state.templateItems.length) await useTemplate(GUEST_TEMPLATE_ID);
+    } catch (error) {
+      console.warn('Guest template bootstrap failed', error);
+    }
+    renderHistory();
+    return;
+  }
+
   if (!detail.user) {
     state.templateItems = [];
     state.historyItems = [];
+    state.activeProject = null;
     renderHistory();
+    refreshProjectSelect([]);
     return;
   }
   try {

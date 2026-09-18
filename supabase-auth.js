@@ -7,6 +7,7 @@
 
   let client = null;
   let currentUser = null;
+  let guestMode = false;
   let resolveReady;
   const ready = new Promise((resolve) => { resolveReady = resolve; });
 
@@ -22,15 +23,23 @@
     el.classList.toggle('hidden', !message);
   }
 
-  function render(session) {
+  function render(session, options = {}) {
     currentUser = session && session.user ? session.user : null;
+    if (typeof options.guest === 'boolean') guestMode = options.guest;
+    if (currentUser) guestMode = false;
+    const hasAccess = Boolean(currentUser || guestMode);
     const gate = document.getElementById('authGate');
     const shell = document.getElementById('appShell');
     const email = document.getElementById('currentUserEmail');
-    if (gate) gate.classList.toggle('hidden', Boolean(currentUser));
-    if (shell) shell.classList.toggle('hidden', !currentUser);
-    if (email) email.textContent = currentUser ? currentUser.email : '';
-    window.dispatchEvent(new CustomEvent('power-auth-change', { detail: { user: currentUser, isAdmin: isAdmin() } }));
+    if (gate) gate.classList.toggle('hidden', hasAccess);
+    if (shell) shell.classList.toggle('hidden', !hasAccess);
+    if (email) email.textContent = currentUser ? currentUser.email : (guestMode ? '游客模式 · 公共数据不可见' : '');
+    window.dispatchEvent(new CustomEvent('power-auth-change', { detail: { user: currentUser, guest: guestMode, isAdmin: isAdmin() } }));
+  }
+
+  function enterGuestMode() {
+    setMessage('');
+    render(null, { guest: true });
   }
 
   async function submit(mode) {
@@ -96,20 +105,32 @@
     document.getElementById('authPassword').addEventListener('keydown', (event) => {
       if (event.key === 'Enter') submit(mode);
     });
-    document.getElementById('logoutBtn').addEventListener('click', () => client.auth.signOut());
+    document.getElementById('guestModeBtn').addEventListener('click', enterGuestMode);
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      if (guestMode) {
+        render(null, { guest: false });
+        return;
+      }
+      await client.auth.signOut();
+    });
 
     const { data } = await client.auth.getSession();
-    render(data.session);
+    render(data.session, { guest: false });
     resolveReady(data.session);
-    client.auth.onAuthStateChange((_event, session) => render(session));
+    client.auth.onAuthStateChange((_event, session) => render(session, { guest: guestMode && !session }));
   }
 
   window.powerAuth = {
     ready,
     client,
     getUser: () => currentUser,
+    isGuest: () => guestMode,
     isAdmin,
-    signOut: () => client ? client.auth.signOut() : Promise.resolve(),
+    enterGuestMode,
+    signOut: async () => {
+      if (guestMode) return render(null, { guest: false });
+      return client ? client.auth.signOut() : Promise.resolve();
+    },
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });

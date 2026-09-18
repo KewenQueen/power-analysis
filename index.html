@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026091801" />
+    <link rel="stylesheet" href="./style.css?v=2026091802" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -33,7 +33,7 @@
         <div class="auth-brand-mark"><span class="material-symbols-outlined">bolt</span></div>
         <p class="auth-eyebrow">POWER WORKSPACE</p>
         <h1>功耗拆解数据分析</h1>
-        <p class="auth-subtitle">登录后即可管理个人历史记录，并使用团队共享的分析模板。</p>
+        <p class="auth-subtitle">登录后可使用团队共享模板与云端历史；也可以游客身份直接体验本地功能。</p>
         <div class="auth-tabs" role="tablist" aria-label="账号操作">
           <button id="authLoginTab" type="button" class="auth-tab active">登录</button>
           <button id="authSignupTab" type="button" class="auth-tab">注册</button>
@@ -48,6 +48,12 @@
         </label>
         <div id="authMessage" class="auth-message hidden" role="status"></div>
         <button id="authSubmitBtn" type="button" class="auth-submit">登录</button>
+        <div class="auth-divider"><span>或</span></div>
+        <button id="guestModeBtn" type="button" class="auth-guest" onclick="window.powerAuth && window.powerAuth.enterGuestMode()">
+          <span class="material-symbols-outlined">person_outline</span>
+          游客模式使用
+        </button>
+        <p class="auth-guest-note">游客可使用内置模板和分析功能，但无法查看团队模板及云端历史。</p>
         <p class="auth-footnote"><span class="material-symbols-outlined">lock</span> 账号由 Supabase Auth 安全托管</p>
       </div>
     </section>
@@ -556,9 +562,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026091801"></script>
-    <script src="./supabase-auth.js?v=2026091801"></script>
-    <script src="./app.js?v=2026091801"></script>
+    <script src="./config.js?v=2026091802"></script>
+    <script src="./supabase-auth.js?v=2026091802"></script>
+    <script src="./app.js?v=2026091802"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
