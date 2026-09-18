@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Cache-Control" content="no-store" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>功耗拆解数据分析</title>
+    <meta name="theme-color" content="#6366f1" />
+    <meta name="application-name" content="功耗拆解数据分析" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="功耗分析" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="icon" href="./icon-192.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icon-192.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="./style.css?v=2026091801" />
+  </head>
+  <body>
+    <div class="page-bg"></div>
+
+    <!-- Supabase account gate -->
+    <section id="authGate" class="auth-gate">
+      <div class="auth-card">
+        <div class="auth-brand-mark"><span class="material-symbols-outlined">bolt</span></div>
+        <p class="auth-eyebrow">POWER WORKSPACE</p>
+        <h1>功耗拆解数据分析</h1>
+        <p class="auth-subtitle">登录后即可管理个人历史记录，并使用团队共享的分析模板。</p>
+        <div class="auth-tabs" role="tablist" aria-label="账号操作">
+          <button id="authLoginTab" type="button" class="auth-tab active">登录</button>
+          <button id="authSignupTab" type="button" class="auth-tab">注册</button>
+        </div>
+        <label class="auth-field">
+          <span>邮箱</span>
+          <input id="authEmail" type="email" autocomplete="email" placeholder="name@example.com" />
+        </label>
+        <label class="auth-field">
+          <span>密码</span>
+          <input id="authPassword" type="password" autocomplete="current-password" placeholder="至少 6 位密码" />
+        </label>
+        <div id="authMessage" class="auth-message hidden" role="status"></div>
+        <button id="authSubmitBtn" type="button" class="auth-submit">登录</button>
+        <p class="auth-footnote"><span class="material-symbols-outlined">lock</span> 账号由 Supabase Auth 安全托管</p>
+      </div>
+    </section>
+
+    <!-- Template rename modal -->
+    <div id="templateRenameModal" class="modal-overlay hidden">
+      <div class="modal-content rounded-3xl p-8">
+        <h2 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
+          <span class="material-symbols-outlined text-indigo-600">drive_file_rename_outline</span>
+          模板命名
+        </h2>
+        <p id="templateRenameDesc" class="mt-3 text-slate-600 leading-7">模板已上传，请补充项目名称，方便后续选择和管理。</p>
+        <input id="templateRenameInput" type="text" placeholder="请输入项目名称" class="mt-4 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100" />
+        <div id="templateRenameError" class="mt-3 text-sm text-red-600 hidden">模板名称不能为空。</div>
+        <div class="mt-5 flex gap-3">
+          <button id="templateRenameConfirmBtn" class="flex-1 rounded-2xl bg-indigo-600 text-white py-3 font-bold hover:bg-indigo-700 transition-colors">保存名称</button>
+          <button id="templateRenameCancelBtn" class="flex-1 rounded-2xl bg-slate-100 text-slate-700 py-3 font-bold hover:bg-slate-200 transition-colors">稍后再说</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Header tooltip for expanded column names -->
+    <div id="headerTooltip" class="header-tooltip hidden"></div>
+
+    <div id="appShell" class="hidden">
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative">
+      <!-- Top bar with account status -->
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 leading-tight">功耗拆解数据分析</h1>
+        <div class="flex items-center gap-3">
+          <div id="adminBadge" class="admin-badge hidden">
+            <span class="material-symbols-outlined text-sm">shield_person</span>
+            管理员模式
+          </div>
+          <span id="currentUserEmail" class="user-email"></span>
+          <button id="logoutBtn" class="admin-toggle-btn rounded-2xl px-4 py-2 text-sm font-semibold">
+            <span class="material-symbols-outlined text-sm">logout</span>
+            退出登录
+          </button>
+        </div>
+      </div>
+
+      <!-- 操作步骤 + 项目模板管理 -->
+      <section class="top-dual-section grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="guide-card top-guide-card rounded-3xl p-5">
+          <details class="guide-details">
+            <summary class="guide-summary">
+              <span class="material-symbols-outlined text-indigo-600">checklist</span>
+              <span class="guide-summary-title">操作指南</span>
+              <span class="guide-summary-hint">点击展开 / 折叠</span>
+              <a href="https://bytedance.larkoffice.com/docx/P7xOdBzT6oU0WfxeqM9cXtpfnMh" target="_blank" rel="noopener" class="guide-doc-link" onclick="event.stopPropagation();" title="打开完整使用手册（飞书文档）">
+                <span class="material-symbols-outlined text-sm align-middle mr-1">menu_book</span>
+                完整使用手册
+              </a>
+              <span class="material-symbols-outlined guide-summary-arrow">expand_more</span>
+            </summary>
+
+            <div class="guide-details-body">
+              <div class="mt-3 guide-block">
+                <div class="guide-block-title">
+                  <span class="material-symbols-outlined text-indigo-600 text-base align-middle mr-1">bolt</span>
+                  基础流程
+                </div>
+                <ol class="mt-1 space-y-1.5 text-slate-700 leading-6 list-decimal list-inside text-sm">
+                  <li>右侧「<strong>项目模板管理</strong>」中选择模板；管理员上传后所有成员/设备均可见（模板已服务端共享）</li>
+                  <li>下方「<strong>文件导入</strong>」上传 CSV，可一次导入多份；<strong>每份 CSV 可分别选择对应项目</strong></li>
+                  <li>点击「<strong>结果导出</strong>」，进度条完成后即可查看结果</li>
+                  <li>「<strong>预览结果</strong>」查看 Sheet3，「<strong>下载 XLSX</strong>」保存本地（保留模板格式与其它 Sheet）</li>
+                </ol>
+              </div>
+
+              <div class="mt-3 guide-block">
+                <div class="guide-block-title">
+                  <span class="material-symbols-outlined text-indigo-600 text-base align-middle mr-1">preview</span>
+                  结果预览
+                </div>
+                <ul class="mt-1 space-y-1 text-slate-700 leading-6 list-disc list-inside text-sm">
+                  <li>单项目多份 → 顶部下拉切换；多项目 → 自动按项目<strong>分栏并排</strong></li>
+                  <li>数据居中显示 2 位小数，表头列宽可拖动；点击 <strong>QEPM 采样通道</strong> 单元格可看该通道的功率波形</li>
+                  <li>「<strong>数据组选择</strong>」面板可自由勾选哪些数据进入预览、加入哪个对比组</li>
+                </ul>
+              </div>
+
+              <div class="mt-3 guide-block">
+                <div class="guide-block-title">
+                  <span class="material-symbols-outlined text-indigo-600 text-base align-middle mr-1">compare_arrows</span>
+                  结果对比
+                </div>
+                <ul class="mt-1 space-y-1 text-slate-700 leading-6 list-disc list-inside text-sm">
+                  <li>右上「<strong>新建对比组</strong>」可建多个方案，同一份数据可加入多个组</li>
+                  <li>同项目对比 → 自动对齐公共列 + N/O/P 数值列，支持「<strong>高亮差异</strong>」</li>
+                  <li>跨项目对比 → 并排展示各项目表格，可<strong>按项目分别</strong>自定义公共列</li>
+                  <li>公共列自定义：填 <code>A-D,M</code> 之类列范围；或点「仅默认列（QEPM+Vavg）」「全部公共列」</li>
+                </ul>
+              </div>
+
+              <div class="mt-3 guide-block">
+                <div class="guide-block-title">
+                  <span class="material-symbols-outlined text-indigo-600 text-base align-middle mr-1">show_chart</span>
+                  波形分析
+                </div>
+                <ul class="mt-1 space-y-1 text-slate-700 leading-6 list-disc list-inside text-sm">
+                  <li>CSV 原始数据预览下方勾选列可生成折线 / 柱状图；滚轮缩放、拖动平移、双击复位</li>
+                  <li>同项目对比 → 点击 QEPM 单元格自动叠加同名通道功率波形</li>
+                  <li>跨项目对比 → 每个项目<strong>分别点选</strong>一个通道，再点「生成对比曲线」叠加显示；数据缺失时会明确提示</li>
+                </ul>
+              </div>
+
+              <div class="mt-3 guide-block">
+                <div class="guide-block-title">
+                  <span class="material-symbols-outlined text-indigo-600 text-base align-middle mr-1">admin_panel_settings</span>
+                  其它
+                </div>
+                <ul class="mt-1 space-y-1 text-slate-700 leading-6 list-disc list-inside text-sm">
+                  <li>「<strong>历史操作记录</strong>」缓存在本机浏览器，可回溯或手动清空</li>
+                  <li>右上「<strong>管理员模式</strong>」可上传 / 替换 / 删除 / 重命名项目模板，操作对<strong>所有成员生效</strong></li>
+                </ul>
+              </div>
+
+              <div class="mt-3 flex flex-wrap gap-2">
+                <a href="./sample-data.csv" download class="action-link action-link-sm text-xs">
+                  <span class="material-symbols-outlined text-sm mr-1">download</span>
+                  下载 CSV 示例
+                </a>
+                <a href="./template.xlsx" download class="action-link action-link-secondary action-link-sm text-xs">
+                  <span class="material-symbols-outlined text-sm mr-1">description</span>
+                  下载模板示例
+                </a>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <!-- 紧凑的项目模板管理面板（仅管理员可见） -->
+        <div class="panel panel-compact rounded-3xl p-4 admin-only-panel">
+          <div class="flex items-start justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="material-symbols-outlined text-indigo-600">folder_managed</span>
+              <div class="min-w-0">
+                <h2 class="text-lg font-bold text-slate-900 leading-tight">项目模板管理</h2>
+                <p class="text-[11px] text-slate-500 mt-0.5">点击模板进入详情，可下载 / 替换 / 删除。</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="status-chip status-chip-sm" id="mainStatus">等待上传</div>
+              <button id="templateNewBtn" class="template-btn template-btn-primary template-btn-sm admin-only-btn" title="新增模板（管理员）">
+                <span class="material-symbols-outlined text-sm align-middle">upload</span>
+                新增
+              </button>
+            </div>
+          </div>
+
+          <!-- 非管理员提示（紧凑） -->
+          <div class="mt-2 admin-only-hidden">
+            <div class="rounded-xl bg-amber-50 border border-amber-200 px-3 py-1.5 text-[11px] text-amber-800 leading-snug">
+              <span class="material-symbols-outlined align-middle text-amber-600 text-sm mr-0.5">info</span>
+              普通用户仅可选择或下载模板；上传 / 删除请先"管理员登录"。
+            </div>
+          </div>
+
+          <!-- 视图 1：列表 -->
+          <div id="templateListView" class="mt-2">
+            <div id="templateList" class="space-y-1.5">
+              <div class="empty-state rounded-xl p-3 text-slate-500 bg-white border border-dashed border-slate-200 text-center text-xs">
+                暂无保存的项目模板
+              </div>
+            </div>
+            <div id="templatePaginationBar" class="mt-2 flex items-center justify-between text-[11px] text-slate-500 hidden">
+              <span id="templatePageInfo"></span>
+              <div class="flex items-center gap-1.5">
+                <button id="templatePrevBtn" class="template-btn template-btn-secondary template-btn-sm">上一页</button>
+                <button id="templateNextBtn" class="template-btn template-btn-secondary template-btn-sm">下一页</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 视图 2：模板详情（点击列表项进入） -->
+          <div id="templateDetailView" class="mt-2 hidden">
+            <button id="templateDetailBack" class="template-btn template-btn-secondary template-btn-sm">
+              <span class="material-symbols-outlined text-sm align-middle">arrow_back</span> 返回列表
+            </button>
+            <div id="templateDetailBody" class="mt-2"></div>
+          </div>
+
+          <!-- 视图 3：上传新模板（管理员） -->
+          <div id="templateUploadView" class="mt-2 hidden">
+            <button id="templateUploadBack" class="template-btn template-btn-secondary template-btn-sm">
+              <span class="material-symbols-outlined text-sm align-middle">arrow_back</span> 返回列表
+            </button>
+            <div class="mt-2 space-y-2">
+              <div>
+                <label class="text-xs font-medium text-slate-600">项目名称（可选）</label>
+                <input id="projectNameInput" type="text" placeholder="例如：DoraG_量产版；也可先上传后再命名" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+              </div>
+              <label for="templateInput" class="upload-zone block rounded-xl border-2 border-dashed border-emerald-200 bg-white p-3 text-center cursor-pointer">
+                <div class="w-8 h-8 mx-auto rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <span class="material-symbols-outlined text-lg">description</span>
+                </div>
+                <h3 class="mt-1 text-sm font-bold text-slate-900">选择或拖拽 .xlsx 模板</h3>
+                <p class="mt-0.5 text-slate-500 text-[11px]">可直接上传；若未提前填写项目名称，上传成功后会弹出命名窗口</p>
+                <input id="templateInput" type="file" accept=".xlsx" class="hidden" />
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 文件导入 & 结果导出（左右布局） -->
+      <section class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6 io-section">
+        <!-- 左侧：文件导入 -->
+        <div class="panel rounded-3xl p-5 flex flex-col io-card">
+          <div class="flex items-center justify-between gap-3 mb-3">
+            <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <span class="material-symbols-outlined text-indigo-600">upload_file</span>
+              文件导入
+            </h2>
+            <div class="status-chip status-chip-sm" id="activeTemplateChip">未选择项目模板</div>
+          </div>
+
+          <!-- 项目选择器 -->
+          <div class="info-card rounded-2xl p-3 mb-3">
+            <label for="projectSelect" class="text-xs font-medium text-slate-600 flex items-center gap-1">
+              <span class="material-symbols-outlined text-indigo-600 text-sm">tune</span>
+              选择项目（导入时自动适配对应模板）
+            </label>
+            <div class="mt-1.5 flex items-center gap-2">
+              <select id="projectSelect" class="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">
+                <option value="">-- 请选择一个项目 --</option>
+              </select>
+              <button id="downloadTemplateBtn" class="flex-shrink-0 inline-flex items-center gap-1 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 px-2.5 py-2 text-xs font-bold hover:bg-indigo-100 transition-colors cursor-pointer" title="下载当前项目模板" disabled>
+                <span class="material-symbols-outlined text-sm">download</span>
+                模板
+              </button>
+            </div>
+            <div id="projectSelectHint" class="mt-1.5 text-[11px] text-slate-500">选择后将自动适配对应模板。</div>
+          </div>
+
+          <!-- 当前状态概览 -->
+          <div class="info-card rounded-2xl p-3 mb-3">
+            <div class="text-xs text-slate-500 flex items-center gap-1">
+              <span class="material-symbols-outlined text-indigo-600 text-sm">folder_open</span>
+              当前项目 / CSV
+            </div>
+            <div class="mt-1 text-sm">
+              <div>项目：<span id="activeProject" class="font-bold text-slate-900 break-all">未选择</span></div>
+              <div class="mt-0.5">CSV：<span id="fileName" class="font-bold text-slate-900 break-all">未上传</span></div>
+            </div>
+          </div>
+
+          <!-- 上传区域 -->
+          <div id="csvUploadArea" class="flex-1 flex flex-col">
+            <label for="fileInput" id="csvDropzone" class="upload-zone flex-1 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-indigo-200 bg-white p-5 text-center cursor-pointer min-h-[120px]">
+              <div class="w-12 h-12 mx-auto rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                <span class="material-symbols-outlined text-2xl">upload_file</span>
+              </div>
+              <h3 class="mt-3 text-sm font-bold text-slate-900">点击或拖拽上传 CSV 文件（支持批量）</h3>
+              <p class="mt-1 text-slate-500 text-xs">支持一次选择多个 .csv 文件批量上传</p>
+              <input id="fileInput" type="file" accept=".csv" class="hidden" multiple />
+            </label>
+          </div>
+
+          <!-- 已上传文件展示 -->
+          <div id="csvFileInfo" class="mt-3 hidden">
+            <div class="flex items-center justify-between gap-3 rounded-2xl border border-indigo-200 bg-indigo-50/50 p-3">
+              <div class="flex items-center gap-2 min-w-0 flex-1">
+                <div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center flex-shrink-0">
+                  <span class="material-symbols-outlined text-lg">description</span>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div id="csvFileNameDisplay" class="font-bold text-slate-900 text-sm">未上传</div>
+                  <div id="csvFileMetaDisplay" class="text-xs text-slate-500 mt-0.5">等待上传</div>
+                </div>
+              </div>
+              <button id="reuploadCsvBtn" class="flex-shrink-0 inline-flex items-center gap-1 rounded-xl bg-indigo-600 text-white px-3 py-2 font-bold text-xs hover:bg-indigo-700 transition-colors cursor-pointer">
+                <span class="material-symbols-outlined text-sm">upload_file</span>
+                导入原始文件
+              </button>
+              <input id="fileInputNew" type="file" accept=".csv" class="hidden" multiple />
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧：结果导出 -->
+        <div class="panel rounded-3xl p-5 flex flex-col io-card">
+          <div class="mb-3">
+            <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <span class="material-symbols-outlined text-emerald-600">output</span>
+              结果导出
+            </h2>
+            <p class="mt-1 text-xs text-slate-500 leading-relaxed">选好项目、导入 CSV 后点击下方按钮，处理完成即可预览或下载。</p>
+          </div>
+
+          <!-- 主按钮 -->
+          <button id="exportBtn" class="w-full rounded-2xl bg-indigo-600 text-white py-3.5 font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 text-sm" disabled>
+            <span class="material-symbols-outlined">play_arrow</span>
+            结果导出
+          </button>
+
+          <!-- 多组数据切换 tabs -->
+          <div id="datasetTabs" class="hidden mt-3 flex items-center gap-2 flex-wrap"></div>
+
+          <!-- 结果操作区 -->
+          <div id="resultActions" class="mt-3 hidden flex-1 flex flex-col">
+            <div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2.5 text-xs text-emerald-800 flex items-center gap-2 mb-3">
+              <span class="material-symbols-outlined text-emerald-600 text-base">check_circle</span>
+              数据处理完成，可预览或下载。
+            </div>
+            <div class="grid grid-cols-1 gap-2">
+              <button id="previewBtn" class="w-full rounded-xl bg-slate-900 text-white py-2.5 font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 text-sm">
+                <span class="material-symbols-outlined text-base">visibility</span>
+                预览结果
+              </button>
+              <button id="downloadBtn" class="w-full rounded-xl bg-emerald-600 text-white py-2.5 font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 text-sm">
+                <span class="material-symbols-outlined text-base">download</span>
+                下载当前 XLSX
+              </button>
+              <button id="downloadAllBtn" class="hidden w-full rounded-xl bg-indigo-600 text-white py-2.5 font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 text-sm" title="将每一组数据分别导出为 XLSX">
+                <span class="material-symbols-outlined text-base">download_for_offline</span>
+                下载全部结果
+              </button>
+            </div>
+            <div class="mt-3">
+              <button id="compareAllBtn" class="hidden w-full rounded-xl bg-fuchsia-600 text-white py-2.5 font-bold hover:bg-fuchsia-700 transition-colors flex items-center justify-center gap-2 text-sm" title="把所有已生成结果的数据组都加入对比区" disabled>
+                <span class="material-symbols-outlined text-base">library_add_check</span>
+                全部加入对比
+              </button>
+            </div>
+          </div>
+
+          <!-- 提示信息 -->
+          <div id="downloadTip" class="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 leading-relaxed">
+            请先选择项目并上传 CSV 文件。
+          </div>
+        </div>
+      </section>
+
+      <!-- 功耗采集数据结果预览（放到 CSV 原始预览之前） -->
+      <section class="mt-6 panel rounded-3xl p-5" id="processedSection">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 class="text-xl font-bold text-slate-900">功耗采集数据结果预览</h2>
+            <p class="text-[11px] text-slate-500 mt-0.5">数值统一保留 2 位小数；数值列等宽；列标题超长可点击查看完整名称。</p>
+          </div>
+          <div id="processedStatus" class="text-xs text-slate-500">尚未生成</div>
+        </div>
+
+        <div class="mt-3 flex flex-wrap gap-2 items-end">
+          <div class="flex-1 min-w-[180px]">
+            <label class="text-[11px] font-medium text-slate-500">展示列（如 A-D,M-P，留空显示全部）</label>
+            <input id="processedColRange" type="text" placeholder="如 A-D,M-P" value="A-D,M-P" class="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+          </div>
+          <button id="processedApplyFilter" class="rounded-lg bg-slate-800 text-white px-3 py-1.5 text-xs font-bold hover:bg-slate-700 transition-colors">应用</button>
+          <button id="processedShowAllBtn" class="rounded-lg bg-slate-100 text-slate-700 px-3 py-1.5 text-xs font-bold hover:bg-slate-200 transition-colors">显示全部列</button>
+          <button id="processedRestoreDefaultBtn" class="rounded-lg bg-slate-100 text-slate-700 px-3 py-1.5 text-xs font-bold hover:bg-slate-200 transition-colors">恢复默认展示</button>
+          <button id="processedSetDefaultBtn" class="admin-only-btn rounded-lg bg-slate-100 text-slate-700 px-3 py-1.5 text-xs font-bold hover:bg-slate-200 transition-colors items-center gap-1" title="将当前展示列表达式保存为全局默认">
+            <span class="material-symbols-outlined text-sm">bookmark</span>
+            设为默认展示
+          </button>
+          <button id="processedAddCompareBtn" class="rounded-lg bg-indigo-600 text-white px-3 py-1.5 text-xs font-bold hover:bg-indigo-700 transition-colors flex items-center gap-1" title="将当前预览快照加入对比区" disabled>
+            <span class="material-symbols-outlined text-sm">library_add</span>
+            加入对比
+          </button>
+        </div>
+
+        <!-- 数据组选择面板：自选预览 / 自选加入对比（2 组及以上时展示） -->
+        <div id="datasetSelectPanel" class="mt-3 hidden"></div>
+
+        <div id="processedSingleWrap" class="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white preview-table-frame">
+          <div class="preview-table-wrap overflow-auto max-h-[36rem] tight-scroll">
+            <table class="min-w-max text-xs processed-table preview-table compact-table numeric-uniform resizable-table">
+              <thead id="processedHead" class="sticky top-0 bg-indigo-50 text-slate-700"></thead>
+              <tbody id="processedBody" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 多项目左右分块预览容器（仅当数据涉及多个项目时展示） -->
+        <div id="processedSplitContainer" class="mt-3 hidden"></div>
+
+        <!-- 对比区 -->
+        <div id="compareArea" class="mt-4 hidden">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2">
+              <span class="material-symbols-outlined text-indigo-600 text-base">compare_arrows</span>
+              <h3 class="text-sm font-bold text-slate-900">结果对比</h3>
+              <span id="compareGroupsChip" class="text-[11px] text-slate-500"></span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button id="addCompareGroupBtn" class="rounded-lg bg-indigo-600 text-white px-3 py-1.5 text-xs font-bold hover:bg-indigo-700 transition-colors flex items-center gap-1" title="新增一个空的对比组">
+                <span class="material-symbols-outlined text-sm">add</span>
+                新建对比组
+              </button>
+            </div>
+          </div>
+          <div id="compareGroupsContainer" class="mt-2 flex flex-col gap-4"></div>
+          <p class="mt-2 text-[11px] text-slate-500 leading-relaxed">
+            提示：可创建多个对比组，每组是一份独立的对比表格。用"加入对比""全部加入对比"会写入第一个对比组，或在上方"数据组选择"面板里点击组标签，把某个数据集加入指定对比组（一个数据集可同时属于多个组）。同一项目的多份数据会自动对齐 N/O/P 三列，左侧公共列默认仅展示"采样通道编号（QEPM）"列、可用"对比公共列"控件自定义；不同项目则并排整表展示。对比时会高亮每行 Power 最大的一组及其采样通道，点击高亮单元格可在下方 CSV 原始数据中定位该通道并绘图。每个对比组右上角提供"删除本组"红色按钮可整组删除。
+          </p>
+        </div>
+      </section>
+
+      <!-- CSV 原始预览（移动到结果预览下方） -->
+      <section class="mt-6 panel rounded-3xl p-5" id="csvPreviewSection">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 class="text-xl font-bold text-slate-900">CSV 原始数据预览</h2>
+            <p class="text-[11px] text-slate-500 mt-0.5">数值型单元格保留 2 位小数；列标题超长可点击查看完整名称。</p>
+          </div>
+          <div id="previewStatus" class="text-xs text-slate-500">暂无数据</div>
+        </div>
+
+        <!-- 列查找控件 -->
+        <div class="mt-3 space-y-2">
+          <div class="flex flex-wrap gap-2 items-end">
+            <div class="flex-1 min-w-[200px]">
+              <label class="text-[11px] font-medium text-slate-500">列查找（模糊匹配表头，如输入 SPM2 / VBAT / CH07）</label>
+              <input id="csvColSearch" type="text" placeholder="输入列名关键字，回车或点查找" class="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+            </div>
+            <button id="csvColSearchBtn" class="rounded-lg bg-slate-800 text-white px-3 py-1.5 text-xs font-bold hover:bg-slate-700 transition-colors">查找</button>
+            <button id="csvColResetBtn" class="rounded-lg bg-slate-100 text-slate-700 px-3 py-1.5 text-xs font-bold hover:bg-slate-200 transition-colors">重置</button>
+          </div>
+          <div id="csvMatchInfo" class="text-[11px] text-slate-500">未搜索，默认显示前 20 列。</div>
+
+          <!-- 匹配到的列（用于图表勾选） -->
+          <div id="csvColPickerWrap" class="hidden">
+            <div class="text-[11px] font-medium text-slate-500 mb-1.5">图表列选择（勾选后作为 Y 轴，X 轴固定为 CSV 数据区第一列）</div>
+            <div id="csvColCheckList" class="flex flex-wrap gap-1.5 max-h-28 overflow-auto pr-1"></div>
+            <div class="mt-2 flex flex-wrap gap-2 items-end">
+              <label class="text-[11px] font-medium text-slate-500">图表类型</label>
+              <select id="chartType" class="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-indigo-400">
+                <option value="line">折线图</option>
+                <option value="bar">柱状图</option>
+              </select>
+              <button id="generateChartBtn" class="rounded-lg bg-indigo-600 text-white px-3 py-1.5 text-xs font-bold hover:bg-indigo-700 transition-colors">
+                <span class="material-symbols-outlined align-middle text-sm">ssid_chart</span>
+                生成图表
+              </button>
+              <button id="clearChartBtn" class="rounded-lg bg-slate-100 text-slate-700 px-3 py-1.5 text-xs font-bold hover:bg-slate-200 transition-colors">清空图表</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 图表区（波形在表格上方） -->
+        <div id="chartContainer" class="mt-4 hidden">
+          <div class="rounded-2xl border border-slate-200 bg-white p-4">
+            <div class="flex items-center justify-between mb-2 gap-3 flex-wrap">
+              <div class="text-sm font-bold text-slate-800 flex items-center gap-1">
+                <span class="material-symbols-outlined text-indigo-600 text-base">insights</span>
+                <span id="chartTitle">数据图表</span>
+              </div>
+              <div class="flex items-center gap-3 flex-wrap justify-end">
+                <div id="chartMetricSelector" class="chart-metric-selector hidden">
+                  <span class="chart-metric-label">指标：</span>
+                  <button type="button" class="chart-metric-btn active" data-metric="current">电流 (I)</button>
+                  <button type="button" class="chart-metric-btn" data-metric="voltage">电压 (V)</button>
+                  <button type="button" class="chart-metric-btn" data-metric="power">功率 (P)</button>
+                </div>
+                <div id="chartMeta" class="text-xs text-slate-500"></div>
+                <button id="chartResetBtn" class="template-btn template-btn-secondary template-btn-sm" type="button">
+                  <span class="material-symbols-outlined text-sm">restart_alt</span>
+                  复位
+                </button>
+              </div>
+            </div>
+            <div class="chart-canvas-wrap">
+              <canvas id="csvChart"></canvas>
+            </div>
+            <div class="chart-zoom-tip">💡 滚轮缩放 XY / Shift+滚轮 缩放 X / Ctrl+滚轮 缩放 Y / 拖动平移 / 双击复位</div>
+          </div>
+        </div>
+
+        <div class="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div class="overflow-auto max-h-[26rem] tight-scroll">
+            <table class="min-w-max w-full text-xs compact-table resizable-table">
+              <thead id="tableHead" class="sticky top-0 bg-slate-100 text-slate-700"></thead>
+              <tbody id="tableBody" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 历史操作记录 -->
+      <section class="mt-6 panel rounded-3xl p-6">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h2 class="text-2xl font-bold text-slate-900">历史操作记录</h2>
+            <p class="mt-2 text-slate-600">每次导出 XLSX 都会自动留痕，记录保存在浏览器本地。</p>
+          </div>
+          <div class="flex items-center gap-3 flex-wrap">
+            <button id="clearHistoryCacheBtn" class="template-btn template-btn-secondary" disabled>清理历史缓存</button>
+            <button id="clearHistoryBtn" class="template-btn template-btn-danger" disabled>清空全部</button>
+          </div>
+        </div>
+        <div id="historyList" class="mt-6 space-y-3 max-h-[30rem] overflow-auto pr-1">
+          <div class="empty-state rounded-2xl p-4 text-slate-500 bg-white border border-dashed border-slate-200 text-center">
+            暂无历史操作记录
+          </div>
+        </div>
+      </section>
+    </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-populate/browser/xlsx-populate.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="./config.js?v=2026091801"></script>
+    <script src="./supabase-auth.js?v=2026091801"></script>
+    <script src="./app.js?v=2026091801"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js').catch((error) => {
+            console.warn('Service Worker 注册失败：', error);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>
