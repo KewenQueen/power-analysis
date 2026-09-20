@@ -119,8 +119,11 @@
     const loginTab = document.getElementById('authLoginTab');
     const signupTab = document.getElementById('authSignupTab');
     const submitBtn = document.getElementById('authSubmitBtn');
+    const emailInput = document.getElementById('authEmail');
     const passwordInput = document.getElementById('authPassword');
     const passwordToggleBtn = document.getElementById('passwordToggleBtn');
+    const adminLoginToggleBtn = document.getElementById('adminLoginToggleBtn');
+    const adminLoginOptions = document.getElementById('adminLoginOptions');
     let mode = 'login';
     const setMode = (next) => {
       mode = next;
@@ -129,6 +132,19 @@
       submitBtn.textContent = mode === 'signup' ? '注册账号' : '登录';
       setMessage('');
     };
+    const setAdminOptions = (expanded) => {
+      adminLoginOptions.classList.toggle('hidden', !expanded);
+      adminLoginToggleBtn.classList.toggle('expanded', expanded);
+      adminLoginToggleBtn.setAttribute('aria-expanded', String(expanded));
+    };
+    adminLoginToggleBtn.addEventListener('click', () => {
+      setAdminOptions(adminLoginToggleBtn.getAttribute('aria-expanded') !== 'true');
+    });
+    document.getElementById('adminEmailLoginBtn').addEventListener('click', () => {
+      setMode('login');
+      setMessage('请输入管理员邮箱和密码，登录后将自动校验管理员权限。');
+      emailInput.focus({ preventScroll: true });
+    });
     loginTab.addEventListener('click', () => setMode('login'));
     signupTab.addEventListener('click', () => setMode('signup'));
     submitBtn.addEventListener('click', () => submit(mode));
