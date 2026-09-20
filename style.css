@@ -1593,6 +1593,11 @@ body.col-resizing {
 .auth-submit { width: 100%; margin-top: 18px; border: 0; border-radius: 14px; padding: 13px; color: #fff; background: linear-gradient(135deg, #4f46e5, #0284c7); font-weight: 800; cursor: pointer; box-shadow: 0 10px 24px rgba(79, 70, 229, .24); transition: transform .2s ease, box-shadow .2s ease; }
 .auth-submit:hover { transform: translateY(-1px); box-shadow: 0 14px 30px rgba(79, 70, 229, .3); }
 .auth-submit:disabled { opacity: .65; cursor: wait; transform: none; }
+.auth-github { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 9px; border: 0; border-radius: 14px; padding: 13px; color: #fff; background: #24292f; font-weight: 800; cursor: pointer; box-shadow: 0 10px 22px rgba(15, 23, 42, .2); transition: transform .2s ease, background .2s ease; }
+.auth-github:hover { background: #0f172a; transform: translateY(-1px); }
+.auth-github:disabled { opacity: .65; cursor: wait; transform: none; }
+.auth-github svg { width: 20px; height: 20px; flex: 0 0 auto; }
+.auth-oauth-note { margin: 9px 0 0; color: #64748b; font-size: 12px; line-height: 1.6; text-align: center; }
 .auth-message { margin-top: 14px; padding: 10px 12px; border-radius: 10px; font-size: 13px; background: #eef2ff; color: #4338ca; }
 .auth-message[data-tone="error"] { background: #fef2f2; color: #b91c1c; }
 .auth-message[data-tone="success"] { background: #ecfdf5; color: #047857; }

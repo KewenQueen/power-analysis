@@ -27,7 +27,7 @@ create index if not exists history_user_created_at_idx on public.history (user_i
 alter table public.templates enable row level security;
 alter table public.history enable row level security;
 
--- 已登录用户可读取团队共享模板；仅管理员邮箱可新增、更新和删除模板。
+-- 已登录用户可读取团队共享模板；管理员邮箱或经 GitHub OAuth 验证的管理员账号可写入模板。
 drop policy if exists "authenticated users read templates" on public.templates;
 create policy "authenticated users read templates" on public.templates
 for select to authenticated using (true);
@@ -37,19 +37,43 @@ create policy "admin inserts templates" on public.templates
 for insert to authenticated
 with check (
   auth.uid() = user_id
-  and lower(coalesce(auth.jwt() ->> 'email', '')) = lower('hukehuan@bytedance.com')
+  and (
+    lower(coalesce(auth.jwt() ->> 'email', '')) = lower('hukehuan@bytedance.com')
+    or (
+      lower(coalesce(auth.jwt() -> 'app_metadata' ->> 'provider', '')) = 'github'
+      and lower(coalesce(auth.jwt() -> 'user_metadata' ->> 'user_name', '')) = 'kewenqueen'
+    )
+  )
 );
 
 drop policy if exists "admin updates templates" on public.templates;
 create policy "admin updates templates" on public.templates
 for update to authenticated
-using (lower(coalesce(auth.jwt() ->> 'email', '')) = lower('hukehuan@bytedance.com'))
-with check (lower(coalesce(auth.jwt() ->> 'email', '')) = lower('hukehuan@bytedance.com'));
+using (
+  lower(coalesce(auth.jwt() ->> 'email', '')) = lower('hukehuan@bytedance.com')
+  or (
+    lower(coalesce(auth.jwt() -> 'app_metadata' ->> 'provider', '')) = 'github'
+    and lower(coalesce(auth.jwt() -> 'user_metadata' ->> 'user_name', '')) = 'kewenqueen'
+  )
+)
+with check (
+  lower(coalesce(auth.jwt() ->> 'email', '')) = lower('hukehuan@bytedance.com')
+  or (
+    lower(coalesce(auth.jwt() -> 'app_metadata' ->> 'provider', '')) = 'github'
+    and lower(coalesce(auth.jwt() -> 'user_metadata' ->> 'user_name', '')) = 'kewenqueen'
+  )
+);
 
 drop policy if exists "admin deletes templates" on public.templates;
 create policy "admin deletes templates" on public.templates
 for delete to authenticated
-using (lower(coalesce(auth.jwt() ->> 'email', '')) = lower('hukehuan@bytedance.com'));
+using (
+  lower(coalesce(auth.jwt() ->> 'email', '')) = lower('hukehuan@bytedance.com')
+  or (
+    lower(coalesce(auth.jwt() -> 'app_metadata' ->> 'provider', '')) = 'github'
+    and lower(coalesce(auth.jwt() -> 'user_metadata' ->> 'user_name', '')) = 'kewenqueen'
+  )
+);
 
 -- 历史记录严格按当前账号隔离。
 drop policy if exists "users read own history" on public.history;

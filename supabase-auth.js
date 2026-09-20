@@ -1,9 +1,9 @@
-/* global supabase */
 (() => {
   const config = window.POWER_ANALYSIS_CONFIG || {};
   const url = config.supabaseUrl;
   const key = config.supabasePublishableKey;
   const adminEmails = (config.adminEmails || []).map((email) => String(email).trim().toLowerCase()).filter(Boolean);
+  const adminGithubLogins = (config.adminGithubLogins || []).map((login) => String(login).trim().toLowerCase()).filter(Boolean);
 
   let client = null;
   let currentUser = null;
@@ -12,7 +12,12 @@
   const ready = new Promise((resolve) => { resolveReady = resolve; });
 
   function isAdmin(user = currentUser) {
-    return Boolean(user && adminEmails.includes(String(user.email || '').toLowerCase()));
+    if (!user) return false;
+    const email = String(user.email || '').trim().toLowerCase();
+    const provider = String(user.app_metadata && user.app_metadata.provider || '').toLowerCase();
+    const metadata = user.user_metadata || {};
+    const githubLogin = String(metadata.user_name || metadata.preferred_username || '').trim().toLowerCase();
+    return adminEmails.includes(email) || (provider === 'github' && adminGithubLogins.includes(githubLogin));
   }
 
   function setMessage(message, tone = 'info') {
@@ -33,13 +38,36 @@
     const email = document.getElementById('currentUserEmail');
     if (gate) gate.classList.toggle('hidden', hasAccess);
     if (shell) shell.classList.toggle('hidden', !hasAccess);
-    if (email) email.textContent = currentUser ? currentUser.email : (guestMode ? '游客模式 · 公共数据不可见' : '');
+    if (email) {
+      const metadata = currentUser && currentUser.user_metadata || {};
+      const identity = currentUser && (currentUser.email || metadata.user_name || metadata.preferred_username);
+      email.textContent = currentUser ? identity : (guestMode ? '游客模式 · 公共数据不可见' : '');
+    }
     window.dispatchEvent(new CustomEvent('power-auth-change', { detail: { user: currentUser, guest: guestMode, isAdmin: isAdmin() } }));
   }
 
   function enterGuestMode() {
     setMessage('');
     render(null, { guest: true });
+  }
+
+  async function signInWithGitHub() {
+    const button = document.getElementById('githubLoginBtn');
+    if (!client || !button) return;
+    button.disabled = true;
+    setMessage('正在跳转到 GitHub 安全登录…');
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const { error } = await client.auth.signInWithOAuth({
+      provider: 'github',
+      options: {
+        redirectTo,
+        scopes: 'read:user user:email',
+      },
+    });
+    if (error) {
+      setMessage(error.message || 'GitHub 登录失败，请稍后重试。', 'error');
+      button.disabled = false;
+    }
   }
 
   async function submit(mode) {
@@ -102,6 +130,7 @@
     loginTab.addEventListener('click', () => setMode('login'));
     signupTab.addEventListener('click', () => setMode('signup'));
     submitBtn.addEventListener('click', () => submit(mode));
+    document.getElementById('githubLoginBtn').addEventListener('click', signInWithGitHub);
     document.getElementById('authPassword').addEventListener('keydown', (event) => {
       if (event.key === 'Enter') submit(mode);
     });
@@ -126,6 +155,7 @@
     getUser: () => currentUser,
     isGuest: () => guestMode,
     isAdmin,
+    signInWithGitHub,
     enterGuestMode,
     signOut: async () => {
       if (guestMode) return render(null, { guest: false });
