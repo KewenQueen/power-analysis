@@ -119,6 +119,8 @@
     const loginTab = document.getElementById('authLoginTab');
     const signupTab = document.getElementById('authSignupTab');
     const submitBtn = document.getElementById('authSubmitBtn');
+    const passwordInput = document.getElementById('authPassword');
+    const passwordToggleBtn = document.getElementById('passwordToggleBtn');
     let mode = 'login';
     const setMode = (next) => {
       mode = next;
@@ -131,7 +133,15 @@
     signupTab.addEventListener('click', () => setMode('signup'));
     submitBtn.addEventListener('click', () => submit(mode));
     document.getElementById('githubLoginBtn').addEventListener('click', signInWithGitHub);
-    document.getElementById('authPassword').addEventListener('keydown', (event) => {
+    passwordToggleBtn.addEventListener('click', () => {
+      const willShow = passwordInput.type === 'password';
+      passwordInput.type = willShow ? 'text' : 'password';
+      passwordToggleBtn.textContent = willShow ? '隐藏' : '显示';
+      passwordToggleBtn.setAttribute('aria-label', willShow ? '隐藏密码' : '显示密码');
+      passwordToggleBtn.setAttribute('aria-pressed', String(willShow));
+      passwordInput.focus({ preventScroll: true });
+    });
+    passwordInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') submit(mode);
     });
     document.getElementById('guestModeBtn').addEventListener('click', enterGuestMode);

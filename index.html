@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026091803" />
+    <link rel="stylesheet" href="./style.css?v=2026091804" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -48,10 +48,13 @@
           <span>邮箱</span>
           <input id="authEmail" type="email" autocomplete="email" placeholder="name@example.com" />
         </label>
-        <label class="auth-field">
-          <span>密码</span>
-          <input id="authPassword" type="password" autocomplete="current-password" placeholder="至少 6 位密码" />
-        </label>
+        <div class="auth-field">
+          <label for="authPassword">密码</label>
+          <div class="auth-password-wrap">
+            <input id="authPassword" type="password" autocomplete="current-password" placeholder="至少 6 位密码" />
+            <button id="passwordToggleBtn" type="button" class="auth-password-toggle" aria-label="显示密码" aria-pressed="false">显示</button>
+          </div>
+        </div>
         <div id="authMessage" class="auth-message hidden" role="status"></div>
         <button id="authSubmitBtn" type="button" class="auth-submit">登录</button>
         <div class="auth-divider"><span>或</span></div>
@@ -568,9 +571,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026091803"></script>
-    <script src="./supabase-auth.js?v=2026091803"></script>
-    <script src="./app.js?v=2026091803"></script>
+    <script src="./config.js?v=2026091804"></script>
+    <script src="./supabase-auth.js?v=2026091804"></script>
+    <script src="./app.js?v=2026091804"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
