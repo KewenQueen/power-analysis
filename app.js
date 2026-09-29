@@ -445,6 +445,12 @@ const state = {
     saveTimer: null,
   },
 
+  // Independent data-export workflow
+  dataExport: {
+    templateId: '',
+    files: [],
+  },
+
   // Compare groups (in-memory). Each group is an independent comparison table.
   // { id, name, snapshots: [], highlightDiff: false }
   compareGroups: [{ id: 'grp_init', name: '对比组 1', snapshots: [], highlightDiff: false }],
@@ -565,6 +571,20 @@ const els = {
   compareGroupsContainer: document.getElementById('compareGroupsContainer'),
   compareGroupsChip: document.getElementById('compareGroupsChip'),
   addCompareGroupBtn: document.getElementById('addCompareGroupBtn'),
+  // Independent data export
+  dataExportTemplateSelect: document.getElementById('dataExportTemplateSelect'),
+  dataExportTemplateHint: document.getElementById('dataExportTemplateHint'),
+  dataExportTemplateStatus: document.getElementById('dataExportTemplateStatus'),
+  dataExportFileInput: document.getElementById('dataExportFileInput'),
+  dataExportDropzone: document.getElementById('dataExportDropzone'),
+  dataExportFileList: document.getElementById('dataExportFileList'),
+  dataExportReimportBtn: document.getElementById('dataExportReimportBtn'),
+  dataExportImportStatus: document.getElementById('dataExportImportStatus'),
+  dataExportRunBtn: document.getElementById('dataExportRunBtn'),
+  dataExportRunStatus: document.getElementById('dataExportRunStatus'),
+  dataExportResultActions: document.getElementById('dataExportResultActions'),
+  dataExportDownloadAllBtn: document.getElementById('dataExportDownloadAllBtn'),
+  dataExportTip: document.getElementById('dataExportTip'),
   // Header tooltip
   headerTooltip: document.getElementById('headerTooltip'),
 };
@@ -2801,6 +2821,141 @@ async function exportTemplateBuilderWorkbook() {
   }
 }
 
+// ---------- Independent data export workflow ----------
+function setDataExportStatus(element, text, stateName = '') {
+  if (!element) return;
+  element.textContent = text;
+  element.classList.toggle('is-complete', stateName === 'complete');
+  element.classList.toggle('is-skipped', stateName === 'skipped');
+}
+
+function getDataExportTemplate() {
+  return state.templateItems.find((item) => item.id === state.dataExport.templateId) || null;
+}
+
+function refreshDataExportTemplateSelect(items = state.templateItems) {
+  if (!els.dataExportTemplateSelect) return;
+  const options = ['<option value="">-- 请选择一个项目模板 --</option>'];
+  items.forEach((item) => {
+    const selected = item.id === state.dataExport.templateId ? ' selected' : '';
+    options.push(`<option value="${escapeHtml(item.id)}"${selected}>${escapeHtml(item.name)}</option>`);
+  });
+  els.dataExportTemplateSelect.innerHTML = options.join('');
+  if (state.dataExport.templateId && !items.some((item) => item.id === state.dataExport.templateId)) {
+    state.dataExport.templateId = '';
+  }
+  els.dataExportTemplateSelect.value = state.dataExport.templateId;
+  if (els.dataExportTemplateHint) {
+    els.dataExportTemplateHint.textContent = items.length
+      ? '模板已就绪。选择后可继续导入 CSV 或 Excel 文件。'
+      : '暂无可用模板，请先到「项目模板管理」新增模板。';
+  }
+  renderDataExportWorkflow();
+}
+
+function renderDataExportWorkflow() {
+  if (!els.dataExportFileList) return;
+  const template = getDataExportTemplate();
+  const files = state.dataExport.files;
+  const csvFiles = files.filter((item) => item.inputType === 'csv');
+  const excelFiles = files.filter((item) => item.inputType === 'excel');
+  const generated = csvFiles.filter((item) => item.workbookBlob);
+
+  setDataExportStatus(els.dataExportTemplateStatus, template ? '已选择' : '待选择', template ? 'complete' : '');
+  setDataExportStatus(els.dataExportImportStatus, files.length ? `已导入 ${files.length} 个` : (template ? '待导入' : '等待模板'), files.length ? 'complete' : '');
+  if (!files.length) setDataExportStatus(els.dataExportRunStatus, '等待文件');
+  else if (!csvFiles.length) setDataExportStatus(els.dataExportRunStatus, 'Excel 已跳过', 'skipped');
+  else if (generated.length === csvFiles.length) setDataExportStatus(els.dataExportRunStatus, '已完成', 'complete');
+  else setDataExportStatus(els.dataExportRunStatus, '待导出');
+
+  els.dataExportRunBtn.disabled = !template || !csvFiles.length;
+  els.dataExportRunBtn.classList.toggle('hidden', files.length > 0 && !csvFiles.length);
+  els.dataExportResultActions.classList.toggle('hidden', !generated.length);
+  els.dataExportReimportBtn.classList.toggle('hidden', !files.length);
+  els.dataExportDropzone.classList.toggle('hidden', files.length > 0);
+  els.dataExportFileList.classList.toggle('hidden', !files.length);
+
+  if (!template) els.dataExportTip.textContent = '请先从模板库选择一个项目模板。';
+  else if (!files.length) els.dataExportTip.textContent = `已选择模板：${template.name}。请继续导入 CSV 或 Excel。`;
+  else if (!csvFiles.length) els.dataExportTip.textContent = `已导入 ${excelFiles.length} 个 Excel 文件，无需再次导出，可直接进入后续数据对比流程。`;
+  else if (generated.length === csvFiles.length) els.dataExportTip.textContent = `已完成 ${generated.length} 个 CSV 的模板适配，可下载生成的 Excel 结果。`;
+  else els.dataExportTip.textContent = `共 ${csvFiles.length} 个 CSV 待适配${excelFiles.length ? `；另有 ${excelFiles.length} 个 Excel 将自动跳过` : ''}。`;
+
+  els.dataExportFileList.innerHTML = files.map((item) => {
+    const isExcel = item.inputType === 'excel';
+    const meta = isExcel ? 'Excel · 跳过导出' : (item.workbookBlob ? 'CSV · 已生成 Excel' : `${getRowCount(item.csvRows)} 行 · 待适配`);
+    return `<div class="analysis-file-item">
+      <span class="analysis-file-item-icon"><span class="material-symbols-outlined">${isExcel ? 'table_view' : 'description'}</span></span>
+      <span class="analysis-file-item-main"><span class="analysis-file-item-name" title="${escapeHtml(item.fileName)}">${escapeHtml(item.fileName)}</span><span class="analysis-file-item-meta">${meta}</span></span>
+      <span class="analysis-file-type ${isExcel ? 'is-excel' : ''}">${isExcel ? 'Excel' : 'CSV'}</span>
+      ${!isExcel ? `<button type="button" class="analysis-file-download" data-data-export-download="${escapeHtml(item.id)}" title="下载生成结果" ${item.workbookBlob ? '' : 'disabled'}><span class="material-symbols-outlined">download</span></button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function handleDataExportFiles(fileList) {
+  const template = getDataExportTemplate();
+  if (!template) { alert('请先在第一步选择项目模板，再导入文件。'); return; }
+  const files = Array.from(fileList || []).filter((file) => file && /\.(csv|xlsx)$/i.test(file.name));
+  if (!files.length) { alert('请选择 .csv 或 .xlsx 格式文件。'); return; }
+  if (files.length > BATCH_MAX) { alert(`一次最多导入 ${BATCH_MAX} 个文件。`); return; }
+
+  const results = await Promise.all(files.map(async (file) => {
+    try {
+      if (/\.xlsx$/i.test(file.name)) {
+        const buffer = await file.arrayBuffer();
+        await XlsxPopulate.fromDataAsync(buffer.slice(0));
+        return { id: genDatasetId(), inputType: 'excel', fileName: file.name, originalBlob: file, workbookBlob: file, projectId: template.id, projectName: template.name };
+      }
+      const rows = parseCsvText(await file.text());
+      const detected = detectHeaderRow(rows);
+      return { id: genDatasetId(), inputType: 'csv', fileName: file.name, csvRows: rows, csvHeaderRowIndex: detected.headerRowIndex, csvDataStartRow: detected.dataStartRow, processedRows: [], processedMerges: [], workbookBlob: null, projectId: template.id, projectName: template.name };
+    } catch (error) {
+      console.error(error);
+      alert(`文件「${file.name}」读取失败，已跳过。`);
+      return null;
+    }
+  }));
+  state.dataExport.files = results.filter(Boolean);
+  renderDataExportWorkflow();
+}
+
+async function runDataExport() {
+  const csvFiles = state.dataExport.files.filter((item) => item.inputType === 'csv');
+  if (!getDataExportTemplate() || !csvFiles.length) return;
+  const original = els.dataExportRunBtn.innerHTML;
+  els.dataExportRunBtn.disabled = true;
+  try {
+    for (let index = 0; index < csvFiles.length; index += 1) {
+      els.dataExportRunBtn.innerHTML = `<span class="material-symbols-outlined animate-spin">progress_activity</span> 正在生成 ${index + 1}/${csvFiles.length}`;
+      await buildDatasetResult(csvFiles[index]);
+    }
+    els.dataExportRunBtn.innerHTML = '<span class="material-symbols-outlined">refresh</span> 重新生成 Excel';
+    renderDataExportWorkflow();
+  } catch (error) {
+    console.error(error);
+    alert(error.message || '生成 Excel 失败，请检查模板和 CSV 文件。');
+    els.dataExportRunBtn.innerHTML = original;
+  } finally {
+    els.dataExportRunBtn.disabled = false;
+    renderDataExportWorkflow();
+  }
+}
+
+function downloadDataExportItem(id) {
+  const item = state.dataExport.files.find((file) => file.id === id && file.inputType === 'csv');
+  if (!item || !item.workbookBlob) return;
+  downloadBlob(item.workbookBlob, item.fileName, item.projectName);
+}
+
+async function downloadAllDataExportResults() {
+  const files = state.dataExport.files.filter((item) => item.inputType === 'csv' && item.workbookBlob);
+  for (let index = 0; index < files.length; index += 1) {
+    downloadBlob(files[index].workbookBlob, files[index].fileName, files[index].projectName);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  }
+}
+
 // ---------- Template list: pagination + views ----------
 function switchTemplateView(view) {
   state.templateView = view;
@@ -2860,6 +3015,7 @@ async function refreshTemplateList() {
   }
 
   refreshProjectSelect(items);
+  refreshDataExportTemplateSelect(items);
 
   const totalPages = Math.max(1, Math.ceil(items.length / TEMPLATE_PAGE_SIZE));
   if (state.templatePage > totalPages) state.templatePage = totalPages;
@@ -5302,6 +5458,44 @@ function bindEvents() {
   els.fileInputNew.addEventListener('change', (event) => { handleCsvFiles(event.target.files); event.target.value = ''; });
   els.reuploadCsvBtn.addEventListener('click', () => els.fileInputNew.click());
 
+  if (els.dataExportTemplateSelect) {
+    els.dataExportTemplateSelect.addEventListener('change', () => {
+      state.dataExport.templateId = els.dataExportTemplateSelect.value;
+      const template = getDataExportTemplate();
+      state.dataExport.files.forEach((item) => {
+        item.projectId = template ? template.id : null;
+        item.projectName = template ? template.name : null;
+        if (item.inputType === 'csv') {
+          item.workbookBlob = null;
+          item.processedRows = [];
+          item.processedMerges = [];
+        }
+      });
+      renderDataExportWorkflow();
+    });
+  }
+  if (els.dataExportFileInput) {
+    els.dataExportFileInput.addEventListener('change', (event) => {
+      handleDataExportFiles(event.target.files);
+      event.target.value = '';
+    });
+  }
+  if (els.dataExportReimportBtn) els.dataExportReimportBtn.addEventListener('click', () => els.dataExportFileInput.click());
+  if (els.dataExportRunBtn) els.dataExportRunBtn.addEventListener('click', runDataExport);
+  if (els.dataExportDownloadAllBtn) els.dataExportDownloadAllBtn.addEventListener('click', downloadAllDataExportResults);
+  if (els.dataExportFileList) {
+    els.dataExportFileList.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-data-export-download]');
+      if (button) downloadDataExportItem(button.dataset.dataExportDownload);
+    });
+  }
+  if (els.dataExportDropzone) {
+    els.dataExportDropzone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      if (event.dataTransfer && event.dataTransfer.files.length) handleDataExportFiles(event.dataTransfer.files);
+    });
+  }
+
   els.exportBtn.addEventListener('click', runExport);
   els.previewBtn.addEventListener('click', previewProcessed);
   els.downloadBtn.addEventListener('click', downloadProcessed);
@@ -5727,6 +5921,7 @@ clearTransientCaches();
 setAdminMode(false);
 updateMatchInfoAndPicker();
 updateSummary();
+renderDataExportWorkflow();
 renderPreview();
 renderHistory();
 
@@ -5763,6 +5958,7 @@ window.addEventListener('power-auth-change', async (event) => {
     state.activeProject = null;
     renderHistory();
     refreshProjectSelect([]);
+    refreshDataExportTemplateSelect([]);
     closeFeaturePage();
     return;
   }

@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026092908" />
+    <link rel="stylesheet" href="./style.css?v=2026092910" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -241,7 +241,7 @@
           <span class="feature-entry-icon"><span class="material-symbols-outlined">file_export</span></span>
           <span class="feature-entry-content">
             <strong>拆解数据导出</strong>
-            <small>独立的数据导出能力即将上线</small>
+            <small>选择模板，导入 CSV / Excel 并按需导出</small>
           </span>
           <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
         </button>
@@ -712,14 +712,81 @@
           </button>
           <div>
             <h2>拆解数据导出</h2>
-            <p>独立的数据导出能力将在后续版本中完善。</p>
+            <p>按步骤选择模板、导入 CSV 或 Excel，并完成按需导出。</p>
           </div>
         </div>
-        <div class="panel rounded-3xl p-8 feature-placeholder">
-          <div class="feature-placeholder-icon"><span class="material-symbols-outlined">file_export</span></div>
-          <h3>功能建设中</h3>
-          <p>后续将在这里提供独立的数据整理、格式选择和批量导出能力。</p>
-        </div>
+
+        <section class="mt-6 analysis-flow" aria-label="拆解数据导出流程">
+          <div class="analysis-flow-line" aria-hidden="true"></div>
+
+          <article class="panel rounded-3xl p-5 analysis-step-card">
+            <div class="analysis-step-heading">
+              <span class="analysis-step-number">1</span>
+              <div><h2>选择模板</h2><p>模板来源于「项目模板管理」，CSV 将使用该模板生成 Excel。</p></div>
+              <span id="dataExportTemplateStatus" class="analysis-step-status">待选择</span>
+            </div>
+            <div class="analysis-step-content">
+              <label for="dataExportTemplateSelect" class="analysis-field-label">项目模板</label>
+              <select id="dataExportTemplateSelect" class="analysis-select">
+                <option value="">-- 请选择一个项目模板 --</option>
+              </select>
+              <p id="dataExportTemplateHint" class="analysis-helper">请先选择模板，再进入文件导入步骤。</p>
+            </div>
+          </article>
+
+          <article class="panel rounded-3xl p-5 analysis-step-card">
+            <div class="analysis-step-heading">
+              <span class="analysis-step-number">2</span>
+              <div><h2>导入文件</h2><p>支持 CSV 或 Excel（.xlsx），最多一次导入 8 个文件。</p></div>
+              <span id="dataExportImportStatus" class="analysis-step-status">等待模板</span>
+            </div>
+            <div class="analysis-step-content">
+              <label for="dataExportFileInput" id="dataExportDropzone" class="upload-zone analysis-upload-zone">
+                <span class="analysis-upload-icon"><span class="material-symbols-outlined">upload_file</span></span>
+                <span><strong>点击或拖拽导入 CSV / Excel</strong><small>CSV 将适配模板并导出；Excel 将直接跳过导出步骤。</small></span>
+                <input id="dataExportFileInput" type="file" accept=".csv,.xlsx" class="hidden" multiple />
+              </label>
+              <div id="dataExportFileList" class="analysis-file-list hidden"></div>
+              <button id="dataExportReimportBtn" type="button" class="template-btn template-btn-secondary hidden analysis-reimport-btn">
+                <span class="material-symbols-outlined text-sm">upload_file</span> 重新导入
+              </button>
+            </div>
+          </article>
+
+          <article class="panel rounded-3xl p-5 analysis-step-card">
+            <div class="analysis-step-heading">
+              <span class="analysis-step-number">3</span>
+              <div><h2>数据导出</h2><p>CSV 适配选中模板后生成 Excel；导入 Excel 时此步骤自动跳过。</p></div>
+              <span id="dataExportRunStatus" class="analysis-step-status">等待文件</span>
+            </div>
+            <div class="analysis-step-content">
+              <button id="dataExportRunBtn" type="button" class="analysis-primary-btn" disabled>
+                <span class="material-symbols-outlined">output</span> 适配模板并生成 Excel
+              </button>
+              <div id="dataExportResultActions" class="hidden mt-3">
+                <div class="analysis-success-note"><span class="material-symbols-outlined">check_circle</span>CSV 已完成模板适配，可以下载生成结果。</div>
+                <button id="dataExportDownloadAllBtn" type="button" class="template-btn template-btn-primary analysis-download-all">
+                  <span class="material-symbols-outlined text-sm">download_for_offline</span> 下载全部 CSV 结果
+                </button>
+              </div>
+              <p id="dataExportTip" class="analysis-helper analysis-tip">请先完成模板选择和文件导入。</p>
+            </div>
+          </article>
+
+          <article class="panel rounded-3xl p-5 analysis-step-card analysis-step-placeholder">
+            <div class="analysis-step-heading">
+              <span class="analysis-step-number">4</span>
+              <div><h2>数据对比</h2><p>CSV 导出完成或 Excel 导入成功后，将在这里进入数据对比。</p></div>
+              <span class="analysis-step-status analysis-step-status-muted">待开发</span>
+            </div>
+            <div class="analysis-step-content">
+              <div class="analysis-coming-soon">
+                <span class="analysis-coming-icon"><span class="material-symbols-outlined">compare_arrows</span></span>
+                <div><h3>数据对比功能建设中</h3><p>后续将支持选择多个文件、配置对比维度并生成差异结果。</p></div>
+              </div>
+            </div>
+          </article>
+        </section>
       </section>
     </main>
     </div>
@@ -730,9 +797,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026092908"></script>
-    <script src="./supabase-auth.js?v=2026092908"></script>
-    <script src="./app.js?v=2026092908"></script>
+    <script src="./config.js?v=2026092910"></script>
+    <script src="./supabase-auth.js?v=2026092910"></script>
+    <script src="./app.js?v=2026092910"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
