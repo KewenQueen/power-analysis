@@ -565,11 +565,6 @@ const els = {
   compareGroupsContainer: document.getElementById('compareGroupsContainer'),
   compareGroupsChip: document.getElementById('compareGroupsChip'),
   addCompareGroupBtn: document.getElementById('addCompareGroupBtn'),
-  // Analysis flow status
-  analysisTemplateStepStatus: document.getElementById('analysisTemplateStepStatus'),
-  analysisImportStepStatus: document.getElementById('analysisImportStepStatus'),
-  analysisExportStepStatus: document.getElementById('analysisExportStepStatus'),
-  analysisCompareStepStatus: document.getElementById('analysisCompareStepStatus'),
   // Header tooltip
   headerTooltip: document.getElementById('headerTooltip'),
 };
@@ -579,11 +574,12 @@ function syncPreviewSectionVisibility() {
   const hasProcessed = state.processedRows.length > 0;
   const hasCompare = state.datasets.some((d) => d.processedRows && d.processedRows.length)
     || state.compareGroups.some((g) => g.snapshots.length > 0);
+  const showDatasetTabs = state.datasets.length > 1;
 
   if (els.csvPreviewSection) els.csvPreviewSection.classList.toggle('hidden', !hasCsv);
   if (els.processedSection) els.processedSection.classList.toggle('hidden', !hasProcessed);
   if (els.compareArea) els.compareArea.classList.toggle('hidden', !hasCompare);
-  if (els.datasetTabs) els.datasetTabs.classList.add('hidden');
+  if (els.datasetTabs) els.datasetTabs.classList.toggle('hidden', !showDatasetTabs);
 }
 
 function resetWorkspaceState() {
@@ -1131,7 +1127,9 @@ function setActiveDataset(id) {
 }
 
 function hasReadyInput() {
-  return state.datasets.some((d) => d.inputType !== 'excel' && d.csvRows && d.csvRows.length > 0 && (d.projectId || state.activeProject));
+  // A dataset is exportable when it has CSV rows AND a resolvable project template
+  // — either its own per-file project or the global default active project.
+  return state.datasets.some((d) => d.csvRows && d.csvRows.length > 0 && (d.projectId || state.activeProject));
 }
 function hasAnyProcessed() {
   return state.datasets.some((d) => d.processedRows && d.processedRows.length > 0);
@@ -1163,42 +1161,16 @@ function detectHeaderRow(rows) {
 }
 
 // ---------- State refresh ----------
-function setAnalysisStepStatus(element, text, stateName = '') {
-  if (!element) return;
-  element.textContent = text;
-  element.classList.toggle('is-complete', stateName === 'complete');
-  element.classList.toggle('is-skipped', stateName === 'skipped');
-}
-
 function updateSummary() {
   const rowCount = getRowCount(state.csvRows);
   const hasProcessed = state.processedRows.length > 0;
-  const csvDatasets = state.datasets.filter((d) => d.inputType !== 'excel');
-  const excelDatasets = state.datasets.filter((d) => d.inputType === 'excel');
   const ready = hasReadyInput();
   const anyProcessed = hasAnyProcessed();
-  const hasImportedFiles = state.datasets.length > 0;
   const nDatasets = state.datasets.length;
 
   els.activeProject.textContent = state.activeProject ? state.activeProject.name : '未选择';
   els.activeTemplateChip.textContent = state.activeProject ? `当前模板：${state.activeProject.name}` : '未选择项目模板';
-  els.fileName.textContent = nDatasets > 1 ? `${nDatasets} 个文件` : (state.fileName || '未上传');
-  setAnalysisStepStatus(els.analysisTemplateStepStatus, state.activeProject ? '已选择' : '待选择', state.activeProject ? 'complete' : '');
-  setAnalysisStepStatus(
-    els.analysisImportStepStatus,
-    hasImportedFiles ? `已导入 ${nDatasets} 个` : (state.activeProject ? '待导入' : '等待模板'),
-    hasImportedFiles ? 'complete' : ''
-  );
-  if (!hasImportedFiles) {
-    setAnalysisStepStatus(els.analysisExportStepStatus, '等待文件');
-  } else if (!csvDatasets.length) {
-    setAnalysisStepStatus(els.analysisExportStepStatus, 'Excel 已跳过', 'skipped');
-  } else if (anyProcessed) {
-    setAnalysisStepStatus(els.analysisExportStepStatus, '已完成', 'complete');
-  } else {
-    setAnalysisStepStatus(els.analysisExportStepStatus, '待导出');
-  }
-  setAnalysisStepStatus(els.analysisCompareStepStatus, '待开发');
+  els.fileName.textContent = nDatasets > 1 ? `${nDatasets} 个 CSV 文件` : (state.fileName || '未上传');
   els.previewStatus.textContent = rowCount ? `已载入 ${rowCount} 行` : '暂无数据';
   if (rowCount && nDatasets > 1) {
     const options = state.datasets.map((d) =>
@@ -1228,50 +1200,48 @@ function updateSummary() {
 
   els.mainStatus.textContent = !hasAnyProject
     ? '未选模板'
-    : !hasImportedFiles
-      ? '待导入文件'
-      : !csvDatasets.length
-        ? 'Excel 已导入'
-        : anyProcessed
-          ? '已生成结果'
-          : '待导出';
+    : !ready
+      ? '待上传 CSV'
+      : anyProcessed
+        ? '已生成结果'
+        : '就绪';
 
   els.exportBtn.disabled = !ready;
-  els.exportBtn.classList.toggle('hidden', hasImportedFiles && !csvDatasets.length);
   if (els.processedAddCompareBtn) els.processedAddCompareBtn.disabled = !hasProcessed;
   if (els.compareAllBtn) {
     els.compareAllBtn.disabled = !anyProcessed || nDatasets < 2;
-    els.compareAllBtn.classList.toggle('hidden', true);
+    els.compareAllBtn.classList.toggle('hidden', nDatasets < 2);
   }
   if (els.downloadAllBtn) {
-    const generatedCsvCount = csvDatasets.filter((d) => d.workbookBlob).length;
-    els.downloadAllBtn.classList.toggle('hidden', generatedCsvCount < 2);
+    els.downloadAllBtn.classList.toggle('hidden', !(anyProcessed && nDatasets > 1));
   }
 
+  // Detect distinct projects across uploaded datasets (for multi-project scenarios)
   const distinctProjectIds = new Set(
     state.datasets.filter((d) => d.projectId).map((d) => d.projectId)
   );
   const multiProject = distinctProjectIds.size > 1;
-  const missingProject = csvDatasets.some((d) => !d.projectId && !state.activeProject);
+  const missingProject = state.datasets.some((d) => d.csvRows && d.csvRows.length && !d.projectId);
 
   if (!hasAnyProject) {
-    els.downloadTip.textContent = '请先从模板库选择一个项目模板。';
-  } else if (!hasImportedFiles) {
+    els.downloadTip.textContent = '请先选择或上传一个项目模板（也可为每个文件单独选择）。';
+  } else if (!ready) {
     const tipName = state.activeProject ? state.activeProject.name : '所选项目';
-    els.downloadTip.textContent = `已选择模板：${tipName}。请继续导入 CSV 或 Excel 文件。`;
-  } else if (!csvDatasets.length) {
-    els.downloadTip.textContent = `已导入 ${excelDatasets.length} 个 Excel 文件，无需模板适配和再次导出，可直接进入后续数据对比流程。`;
+    els.downloadTip.textContent = `已选择项目模板：${tipName}。请继续上传 CSV（支持一次批量上传多个）。`;
   } else if (anyProcessed) {
-    els.downloadTip.textContent = csvDatasets.length > 1
-      ? `已完成 ${csvDatasets.length} 个 CSV 的模板适配，可下载生成的 Excel 结果。`
-      : 'CSV 已完成模板适配，可下载生成的 Excel 结果。';
+    els.downloadTip.textContent = nDatasets > 1
+      ? (multiProject
+          ? `已生成 ${nDatasets} 组结果（涉及 ${distinctProjectIds.size} 个不同项目）。可切换上方数据组预览，或用"下载全部结果"批量下载。`
+          : `已生成 ${nDatasets} 组结果。可切换上方数据组预览，或用"下载全部结果"批量下载。`)
+      : '结果已生成。可点击下方"预览结果"或"下载 XLSX"。';
   } else if (missingProject) {
-    els.downloadTip.textContent = 'CSV 尚未关联项目模板，请返回第一步选择模板。';
+    els.downloadTip.textContent = '部分文件尚未指定项目模板，请在上方文件列表为每个文件选择项目后再导出。';
   } else {
-    const excelNote = excelDatasets.length ? `；另有 ${excelDatasets.length} 个 Excel 已自动跳过` : '';
-    els.downloadTip.textContent = multiProject
-      ? `CSV 已关联不同项目模板，点击按钮后将分别生成 Excel${excelNote}。`
-      : `共 ${csvDatasets.length} 个 CSV 待适配，点击按钮生成 Excel${excelNote}。`;
+    els.downloadTip.textContent = nDatasets > 1
+      ? (multiProject
+          ? `共 ${nDatasets} 组 CSV，涉及 ${distinctProjectIds.size} 个不同项目模板，点击"结果导出"按对应模板批量生成。`
+          : `模板已选，共 ${nDatasets} 组 CSV 待处理，点击"结果导出"批量生成。`)
+      : '模板和 CSV 已就绪，点击"结果导出"开始处理。';
   }
 
   if (anyProcessed) els.resultActions.classList.remove('hidden');
@@ -1283,18 +1253,30 @@ function updateSummary() {
   syncPreviewSectionVisibility();
 }
 
-// Renders one imported-file line.
+// Builds <option> list for a per-file project dropdown, marking the dataset's
+// current project as selected.
+function buildDatasetProjectOptions(selectedId) {
+  const opts = ['<option value="">— 默认（跟随全局项目）—</option>'];
+  for (const it of state.templateItems) {
+    const sel = it.id === selectedId ? ' selected' : '';
+    opts.push(`<option value="${escapeHtml(it.id)}"${sel}>${escapeHtml(it.name)}</option>`);
+  }
+  return opts.join('');
+}
+
+// Renders one uploaded-file line with its own project selector.
 function renderCsvFileLine(d, i, opts = {}) {
   const { active = false, showIdx = true } = opts;
   const color = DS_COLORS[i % DS_COLORS.length];
   const idxBadge = showIdx
     ? `<span class="csv-file-idx" style="background:${color}">#${i + 1}</span>`
     : '';
-  const typeLabel = d.inputType === 'excel' ? 'Excel · 跳过导出' : 'CSV · 待适配';
   return `<div class="csv-file-line ${active ? 'csv-file-line-active' : ''}">
       ${idxBadge}
       <span class="csv-file-name" title="${escapeHtml(d.fileName)}">${escapeHtml(d.fileName)}</span>
-      <span class="analysis-file-type ${d.inputType === 'excel' ? 'is-excel' : ''}">${typeLabel}</span>
+      <select class="csv-file-project-select" data-action="ds-project" data-ds-id="${escapeHtml(d.id)}" title="为该文件选择项目模板">
+        ${buildDatasetProjectOptions(d.projectId || '')}
+      </select>
     </div>`;
 }
 
@@ -1312,16 +1294,13 @@ function updateCsvFileDisplay() {
       ).join('');
       const rowCount = getRowCount(ds.csvRows);
       const colCount = getColCount(ds.csvRows);
-      const typeText = ds.inputType === 'excel' ? 'Excel 已导入，跳过导出步骤' : `${rowCount} 行 × ${colCount} 列`;
-      els.csvFileMetaDisplay.textContent = `共 ${n} 个文件 · 当前 #${activeIdx + 1}：${typeText}`;
+      els.csvFileMetaDisplay.textContent = `共 ${n} 组数据 · 当前预览 #${activeIdx + 1}：${rowCount} 行 × ${colCount} 列 · 可为每个文件单独选择项目模板`;
     } else {
       els.csvFileNameDisplay.style.whiteSpace = 'normal';
       els.csvFileNameDisplay.innerHTML = renderCsvFileLine(ds, 0, { active: false, showIdx: false });
       const rowCount = getRowCount(ds.csvRows);
       const colCount = getColCount(ds.csvRows);
-      els.csvFileMetaDisplay.textContent = ds.inputType === 'excel'
-        ? 'Excel 已导入，将自动跳过模板适配与导出步骤'
-        : `${rowCount} 行 × ${colCount} 列 · 将使用第一步选中的模板`;
+      els.csvFileMetaDisplay.textContent = `${rowCount} 行 × ${colCount} 列 · 可为该文件单独选择项目模板`;
     }
   } else {
     els.csvDropzone.classList.remove('hidden');
@@ -2540,17 +2519,21 @@ function resetAllProcessed() {
   state.datasets.forEach((d) => {
     d.processedRows = [];
     d.processedMerges = [];
-    d.workbookBlob = d.inputType === 'excel' ? (d.originalExcelBlob || d.workbookBlob) : null;
+    d.workbookBlob = null;
   });
   syncActiveDatasetToState();
 }
 
-// Applies the selected template to every imported file in the guided analysis flow.
+// Backward-compatible "set all" shortcut: applies the given project as the
+// default to every dataset that does not yet have its own project assigned.
+// Datasets that already carry an explicit per-file project are left untouched.
 function applyDefaultProjectToDatasets(record) {
   if (!record) return;
   state.datasets.forEach((d) => {
-    d.projectId = record.id;
-    d.projectName = record.name;
+    if (!d.projectId) {
+      d.projectId = record.id;
+      d.projectName = record.name;
+    }
   });
 }
 
@@ -2994,7 +2977,7 @@ function renderTemplateDetail() {
 function refreshProjectSelect(items) {
   if (!els.projectSelect) return;
   const activeId = state.activeProject ? state.activeProject.id : '';
-  const opts = ['<option value="">-- 请选择一个项目模板 --</option>'];
+  const opts = ['<option value="">-- 请选择一个项目 --</option>'];
   for (const it of items) {
     const sel = it.id === activeId ? ' selected' : '';
     opts.push(`<option value="${escapeHtml(it.id)}"${sel}>${escapeHtml(it.name)}</option>`);
@@ -3002,9 +2985,9 @@ function refreshProjectSelect(items) {
   els.projectSelect.innerHTML = opts.join('');
   if (activeId) els.projectSelect.value = activeId;
   if (!items.length) {
-    els.projectSelectHint.textContent = '暂无可用模板，请先到「项目模板管理」新增模板。';
+    els.projectSelectHint.textContent = '暂无可用项目，请在右侧"项目模板管理"新增模板。';
   } else {
-    els.projectSelectHint.textContent = '模板已就绪。选择后可继续导入 CSV 或 Excel 文件。';
+    els.projectSelectHint.textContent = '选择后将自动把该项目的模板设为当前使用模板。';
   }
 }
 
@@ -3302,61 +3285,52 @@ function handleTemplateFile(file, opts = {}) {
   });
 }
 
-// ---------- CSV / Excel import ----------
-async function handleAnalysisFiles(fileList) {
-  if (!state.activeProject) {
-    alert('请先在第一步选择项目模板，再导入文件。');
-    return;
-  }
-  const files = Array.from(fileList || []).filter((file) => file && /\.(csv|xlsx)$/i.test(file.name));
-  if (!files.length) { alert('请选择 .csv 或 .xlsx 格式文件。'); return; }
-  if (files.length > BATCH_MAX) { alert(`一次最多导入 ${BATCH_MAX} 个文件。`); return; }
+// ---------- Batch CSV upload ----------
+function handleCsvFiles(fileList) {
+  const files = Array.from(fileList || []).filter((f) => f && f.name.toLowerCase().endsWith('.csv'));
+  if (!files.length) { alert('请选择 .csv 格式文件。'); return; }
+  if (files.length > BATCH_MAX) { alert(`一次最多批量上传 ${BATCH_MAX} 个 CSV 文件。`); return; }
 
-  const results = await Promise.all(files.map(async (file) => {
-    const project = state.activeProject;
-    try {
-      if (/\.xlsx$/i.test(file.name)) {
-        const buffer = await file.arrayBuffer();
-        await XlsxPopulate.fromDataAsync(buffer.slice(0));
-        return {
+  const results = new Array(files.length);
+  let pending = files.length;
+  let hadError = false;
+
+  files.forEach((file, i) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const rows = parseCsvText(reader.result);
+        const d = detectHeaderRow(rows);
+        results[i] = {
           id: genDatasetId(),
-          inputType: 'excel',
           fileName: file.name,
-          csvRows: [],
-          csvHeaderRowIndex: -1,
-          csvDataStartRow: -1,
+          csvRows: rows,
+          csvHeaderRowIndex: d.headerRowIndex,
+          csvDataStartRow: d.dataStartRow,
           processedRows: [],
           processedMerges: [],
-          workbookBlob: file,
-          originalExcelBlob: file,
-          projectId: project.id,
-          projectName: project.name,
+          workbookBlob: null,
+          // Each dataset carries its own project association. Initialize it from
+          // the currently selected global project (acts as the default), but it
+          // can be overridden per-file later via the per-file project dropdown.
+          projectId: state.activeProject ? state.activeProject.id : null,
+          projectName: state.activeProject ? state.activeProject.name : null,
         };
+      } catch (error) {
+        console.error(error);
+        hadError = true;
+        alert(`CSV「${file.name}」读取失败，已跳过。`);
       }
-
-      const rows = parseCsvText(await file.text());
-      const detected = detectHeaderRow(rows);
-      return {
-        id: genDatasetId(),
-        inputType: 'csv',
-        fileName: file.name,
-        csvRows: rows,
-        csvHeaderRowIndex: detected.headerRowIndex,
-        csvDataStartRow: detected.dataStartRow,
-        processedRows: [],
-        processedMerges: [],
-        workbookBlob: null,
-        projectId: project.id,
-        projectName: project.name,
-      };
-    } catch (error) {
-      console.error(error);
-      alert(`文件「${file.name}」读取失败，已跳过。`);
-      return null;
-    }
-  }));
-
-  finalizeBatch(results.filter(Boolean));
+      pending -= 1;
+      if (pending === 0) finalizeBatch(results.filter(Boolean), hadError);
+    };
+    reader.onerror = () => {
+      hadError = true;
+      pending -= 1;
+      if (pending === 0) finalizeBatch(results.filter(Boolean), hadError);
+    };
+    reader.readAsText(file, 'utf-8');
+  });
 }
 
 function finalizeBatch(newDatasets) {
@@ -4027,7 +4001,7 @@ function downloadBlob(blob, sourceFileName, projectName) {
 
 async function runExport() {
   if (!hasReadyInput()) return;
-  const targets = state.datasets.filter((d) => d.inputType !== 'excel' && d.csvRows && d.csvRows.length);
+  const targets = state.datasets.filter((d) => d.csvRows && d.csvRows.length);
   const total = targets.length;
   els.exportBtn.disabled = true;
   els.downloadTip.textContent = '正在基于所选模板处理数据，请稍候。';
@@ -4080,15 +4054,19 @@ async function runExport() {
     });
     setProgress(100, '✓ 导出完成');
     await waitForNextFrame();
-    state.activeDatasetId = targets[0].id;
-    syncActiveDatasetToState();
     els.mainStatus.textContent = '已生成结果';
     els.downloadTip.textContent = total > 1
-      ? `已完成 ${total} 个 CSV 的模板适配，可下载全部 Excel 结果。`
-      : `CSV 已写入“${TARGET_SHEET_NAME}”，Excel 结果已生成。`;
+      ? `已完成 ${total} 组数据处理。已自动打开结果预览，并生成对比区快照。`
+      : `已完成处理：CSV 已写入"${TARGET_SHEET_NAME}"，预览取自"${PREVIEW_SHEET_NAME}"。`;
     els.resultActions.classList.remove('hidden');
-    els.exportBtn.innerHTML = '<span class="material-symbols-outlined">refresh</span> 重新生成 Excel';
+    els.exportBtn.innerHTML = '<span class="material-symbols-outlined">refresh</span> 重新生成结果';
     renderProcessedPreview();
+    scrollToEl(els.processedSection);
+    if (state.datasets.length >= 2) {
+      replaceCompareSnapshotsWithAllProcessed();
+      renderCompareAuto();
+      setTimeout(() => scrollToEl(els.compareArea), 180);
+    }
     renderPreview();
     updateSummary();
   } catch (error) {
@@ -4108,6 +4086,9 @@ function replaceCompareSnapshotsWithAllProcessed() {
   renderCompareArea();
   renderDatasetSelectPanel();
   return done.length;
+}
+function renderCompareAuto() {
+  renderCompareArea();
 }
 function scrollToPreview() {
   scrollToEl(els.processedSection || document.querySelector('.processed-table'), 'start');
@@ -4138,7 +4119,7 @@ async function downloadProcessed() {
   }
 }
 async function downloadAllProcessed() {
-  const targets = state.datasets.filter((d) => d.inputType !== 'excel' && d.csvRows && d.csvRows.length);
+  const targets = state.datasets.filter((d) => d.csvRows && d.csvRows.length);
   if (!targets.length) return;
   els.downloadAllBtn.disabled = true;
   const original = els.downloadAllBtn.innerHTML;
@@ -5317,8 +5298,8 @@ function bindEvents() {
     }
     event.target.value = '';
   });
-  els.fileInput.addEventListener('change', (event) => { handleAnalysisFiles(event.target.files); event.target.value = ''; });
-  els.fileInputNew.addEventListener('change', (event) => { handleAnalysisFiles(event.target.files); event.target.value = ''; });
+  els.fileInput.addEventListener('change', (event) => { handleCsvFiles(event.target.files); event.target.value = ''; });
+  els.fileInputNew.addEventListener('change', (event) => { handleCsvFiles(event.target.files); event.target.value = ''; });
   els.reuploadCsvBtn.addEventListener('click', () => els.fileInputNew.click());
 
   els.exportBtn.addEventListener('click', runExport);
@@ -5334,13 +5315,13 @@ function bindEvents() {
       zone.addEventListener(eventName, (event) => { event.preventDefault(); zone.classList.remove('drag-active'); });
     });
   });
-  // Drop CSV / Excel files onto the import zones
+  // Drop CSV files onto CSV zones
   [els.csvDropzone, els.csvFileInfo].forEach((zone) => {
     if (!zone) return;
     zone.addEventListener('drop', (event) => {
       event.preventDefault();
       if (event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files.length) {
-        handleAnalysisFiles(event.dataTransfer.files);
+        handleCsvFiles(event.dataTransfer.files);
       }
     });
   });

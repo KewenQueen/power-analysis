@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026092909" />
+    <link rel="stylesheet" href="./style.css?v=2026092908" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -233,7 +233,7 @@
           <span class="feature-entry-icon"><span class="material-symbols-outlined">query_stats</span></span>
           <span class="feature-entry-content">
             <strong>拆解数据对比分析</strong>
-            <small>选择模板，导入 CSV / Excel 并按需导出</small>
+            <small>导入 CSV、生成结果并完成多项目对比</small>
           </span>
           <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
         </button>
@@ -406,148 +406,141 @@
           </button>
           <div>
             <h2>拆解数据对比分析</h2>
-            <p>按步骤选择模板、导入 CSV 或 Excel，并完成按需导出。</p>
+            <p>导入 CSV、生成拆解结果，并完成同项目或跨项目的数据对比。</p>
           </div>
         </div>
 
-      <!-- 数据对比分析流程 -->
-      <section class="mt-6 analysis-flow" aria-label="拆解数据对比分析流程">
-        <div class="analysis-flow-line" aria-hidden="true"></div>
-
-        <article class="panel rounded-3xl p-5 analysis-step-card" data-analysis-step="1">
-          <div class="analysis-step-heading">
-            <span class="analysis-step-number">1</span>
-            <div>
-              <h2>选择模板</h2>
-              <p>模板来源于「项目模板管理」，选中后将用于适配 CSV 数据。</p>
-            </div>
-            <span id="analysisTemplateStepStatus" class="analysis-step-status">待选择</span>
+      <!-- 文件导入 & 结果导出（左右布局） -->
+      <section class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6 io-section">
+        <!-- 左侧：文件导入 -->
+        <div class="panel rounded-3xl p-5 flex flex-col io-card">
+          <div class="flex items-center justify-between gap-3 mb-3">
+            <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <span class="material-symbols-outlined text-indigo-600">upload_file</span>
+              文件导入
+            </h2>
+            <div class="status-chip status-chip-sm" id="activeTemplateChip">未选择项目模板</div>
           </div>
-          <div class="analysis-step-content">
-            <div class="analysis-template-row">
-              <div class="min-w-0 flex-1">
-                <label for="projectSelect" class="analysis-field-label">项目模板</label>
-                <select id="projectSelect" class="analysis-select">
-                  <option value="">-- 请选择一个项目模板 --</option>
-                </select>
-              </div>
-              <button id="downloadTemplateBtn" class="template-btn template-btn-secondary analysis-download-template" title="下载当前项目模板" disabled>
+
+          <!-- 项目选择器 -->
+          <div class="info-card rounded-2xl p-3 mb-3">
+            <label for="projectSelect" class="text-xs font-medium text-slate-600 flex items-center gap-1">
+              <span class="material-symbols-outlined text-indigo-600 text-sm">tune</span>
+              选择项目（导入时自动适配对应模板）
+            </label>
+            <div class="mt-1.5 flex items-center gap-2">
+              <select id="projectSelect" class="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">
+                <option value="">-- 请选择一个项目 --</option>
+              </select>
+              <button id="downloadTemplateBtn" class="flex-shrink-0 inline-flex items-center gap-1 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 px-2.5 py-2 text-xs font-bold hover:bg-indigo-100 transition-colors cursor-pointer" title="下载当前项目模板" disabled>
                 <span class="material-symbols-outlined text-sm">download</span>
-                下载模板
+                模板
               </button>
             </div>
-            <div class="analysis-current-template">
-              <span class="material-symbols-outlined">description</span>
-              <div>
-                <span class="analysis-muted">当前模板</span>
-                <strong id="activeProject">未选择</strong>
-              </div>
-              <span class="status-chip status-chip-sm" id="activeTemplateChip">未选择项目模板</span>
-            </div>
-            <p id="projectSelectHint" class="analysis-helper">请先选择模板，再进入文件导入步骤。</p>
+            <div id="projectSelectHint" class="mt-1.5 text-[11px] text-slate-500">选择后将自动适配对应模板。</div>
           </div>
-        </article>
 
-        <article class="panel rounded-3xl p-5 analysis-step-card" data-analysis-step="2">
-          <div class="analysis-step-heading">
-            <span class="analysis-step-number">2</span>
-            <div>
-              <h2>导入文件</h2>
-              <p>支持 CSV 或 Excel（.xlsx），最多一次导入 8 个文件。</p>
+          <!-- 当前状态概览 -->
+          <div class="info-card rounded-2xl p-3 mb-3">
+            <div class="text-xs text-slate-500 flex items-center gap-1">
+              <span class="material-symbols-outlined text-indigo-600 text-sm">folder_open</span>
+              当前项目 / CSV
             </div>
-            <span id="analysisImportStepStatus" class="analysis-step-status">等待模板</span>
+            <div class="mt-1 text-sm">
+              <div>项目：<span id="activeProject" class="font-bold text-slate-900 break-all">未选择</span></div>
+              <div class="mt-0.5">CSV：<span id="fileName" class="font-bold text-slate-900 break-all">未上传</span></div>
+            </div>
           </div>
-          <div class="analysis-step-content">
-            <div id="csvUploadArea">
-              <label for="fileInput" id="csvDropzone" class="upload-zone analysis-upload-zone">
-                <div class="analysis-upload-icon"><span class="material-symbols-outlined">upload_file</span></div>
-                <div>
-                  <h3>点击或拖拽导入 CSV / Excel</h3>
-                  <p>CSV 将在下一步适配模板并导出；Excel 将直接跳过导出步骤。</p>
+
+          <!-- 上传区域 -->
+          <div id="csvUploadArea" class="flex-1 flex flex-col">
+            <label for="fileInput" id="csvDropzone" class="upload-zone flex-1 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-indigo-200 bg-white p-5 text-center cursor-pointer min-h-[120px]">
+              <div class="w-12 h-12 mx-auto rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                <span class="material-symbols-outlined text-2xl">upload_file</span>
+              </div>
+              <h3 class="mt-3 text-sm font-bold text-slate-900">点击或拖拽上传 CSV 文件（支持批量）</h3>
+              <p class="mt-1 text-slate-500 text-xs">支持一次选择多个 .csv 文件批量上传</p>
+              <input id="fileInput" type="file" accept=".csv" class="hidden" multiple />
+            </label>
+          </div>
+
+          <!-- 已上传文件展示 -->
+          <div id="csvFileInfo" class="mt-3 hidden">
+            <div class="flex items-center justify-between gap-3 rounded-2xl border border-indigo-200 bg-indigo-50/50 p-3">
+              <div class="flex items-center gap-2 min-w-0 flex-1">
+                <div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center flex-shrink-0">
+                  <span class="material-symbols-outlined text-lg">description</span>
                 </div>
-                <input id="fileInput" type="file" accept=".csv,.xlsx" class="hidden" multiple />
-              </label>
-            </div>
-            <div id="csvFileInfo" class="hidden">
-              <div class="analysis-file-summary">
-                <div class="analysis-file-main">
-                  <div class="analysis-upload-icon analysis-upload-icon-sm"><span class="material-symbols-outlined">folder_open</span></div>
-                  <div class="min-w-0 flex-1">
-                    <div id="csvFileNameDisplay" class="font-bold text-slate-900 text-sm">未上传</div>
-                    <div id="csvFileMetaDisplay" class="text-xs text-slate-500 mt-1">等待上传</div>
-                  </div>
+                <div class="min-w-0 flex-1">
+                  <div id="csvFileNameDisplay" class="font-bold text-slate-900 text-sm">未上传</div>
+                  <div id="csvFileMetaDisplay" class="text-xs text-slate-500 mt-0.5">等待上传</div>
                 </div>
-                <button id="reuploadCsvBtn" class="template-btn template-btn-secondary">
-                  <span class="material-symbols-outlined text-sm">upload_file</span>
-                  重新导入
-                </button>
-                <input id="fileInputNew" type="file" accept=".csv,.xlsx" class="hidden" multiple />
               </div>
+              <button id="reuploadCsvBtn" class="flex-shrink-0 inline-flex items-center gap-1 rounded-xl bg-indigo-600 text-white px-3 py-2 font-bold text-xs hover:bg-indigo-700 transition-colors cursor-pointer">
+                <span class="material-symbols-outlined text-sm">upload_file</span>
+                导入原始文件
+              </button>
+              <input id="fileInputNew" type="file" accept=".csv" class="hidden" multiple />
             </div>
-            <div class="analysis-file-current">当前文件：<strong id="fileName">未上传</strong></div>
           </div>
-        </article>
+        </div>
 
-        <article class="panel rounded-3xl p-5 analysis-step-card" data-analysis-step="3">
-          <div class="analysis-step-heading">
-            <span class="analysis-step-number">3</span>
-            <div>
-              <h2>数据导出</h2>
-              <p>CSV 适配选中模板后生成 Excel；导入 Excel 时此步骤自动跳过。</p>
-            </div>
-            <span id="analysisExportStepStatus" class="analysis-step-status">等待文件</span>
+        <!-- 右侧：结果导出 -->
+        <div class="panel rounded-3xl p-5 flex flex-col io-card">
+          <div class="mb-3">
+            <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <span class="material-symbols-outlined text-emerald-600">output</span>
+              结果导出
+            </h2>
+            <p class="mt-1 text-xs text-slate-500 leading-relaxed">选好项目、导入 CSV 后点击下方按钮，处理完成即可预览或下载。</p>
           </div>
-          <div class="analysis-step-content">
-            <button id="exportBtn" class="analysis-primary-btn" disabled>
-              <span class="material-symbols-outlined">output</span>
-              适配模板并导出 Excel
-            </button>
-            <div id="datasetTabs" class="hidden mt-3 flex items-center gap-2 flex-wrap"></div>
-            <div id="resultActions" class="mt-3 hidden">
-              <div class="analysis-success-note">
-                <span class="material-symbols-outlined">check_circle</span>
-                CSV 已完成模板适配，可下载生成的 Excel 文件。
-              </div>
-              <button id="previewBtn" class="hidden" type="button">预览结果</button>
-              <div class="analysis-result-buttons">
-                <button id="downloadBtn" class="template-btn template-btn-primary">
-                  <span class="material-symbols-outlined text-sm">download</span>
-                  下载当前结果
-                </button>
-                <button id="downloadAllBtn" class="hidden template-btn template-btn-secondary" title="将每一组 CSV 分别导出为 XLSX">
-                  <span class="material-symbols-outlined text-sm">download_for_offline</span>
-                  下载全部结果
-                </button>
-              </div>
-              <button id="compareAllBtn" class="hidden" type="button" disabled>全部加入对比</button>
-            </div>
-            <div id="downloadTip" class="analysis-helper analysis-tip">请先完成模板选择和文件导入。</div>
-          </div>
-        </article>
 
-        <article class="panel rounded-3xl p-5 analysis-step-card analysis-step-placeholder" data-analysis-step="4">
-          <div class="analysis-step-heading">
-            <span class="analysis-step-number">4</span>
-            <div>
-              <h2>数据对比</h2>
-              <p>CSV 导出完成或 Excel 导入成功后，将在这里进入数据对比。</p>
+          <!-- 主按钮 -->
+          <button id="exportBtn" class="w-full rounded-2xl bg-indigo-600 text-white py-3.5 font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 text-sm" disabled>
+            <span class="material-symbols-outlined">play_arrow</span>
+            结果导出
+          </button>
+
+          <!-- 多组数据切换 tabs -->
+          <div id="datasetTabs" class="hidden mt-3 flex items-center gap-2 flex-wrap"></div>
+
+          <!-- 结果操作区 -->
+          <div id="resultActions" class="mt-3 hidden flex-1 flex flex-col">
+            <div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2.5 text-xs text-emerald-800 flex items-center gap-2 mb-3">
+              <span class="material-symbols-outlined text-emerald-600 text-base">check_circle</span>
+              数据处理完成，可预览或下载。
             </div>
-            <span id="analysisCompareStepStatus" class="analysis-step-status analysis-step-status-muted">待开发</span>
-          </div>
-          <div class="analysis-step-content">
-            <div class="analysis-coming-soon">
-              <div class="analysis-coming-icon"><span class="material-symbols-outlined">compare_arrows</span></div>
-              <div>
-                <h3>数据对比功能建设中</h3>
-                <p>后续将支持选择多个已导入的数据文件，配置对比维度并生成差异结果。</p>
-              </div>
+            <div class="grid grid-cols-1 gap-2">
+              <button id="previewBtn" class="w-full rounded-xl bg-slate-900 text-white py-2.5 font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 text-sm">
+                <span class="material-symbols-outlined text-base">visibility</span>
+                预览结果
+              </button>
+              <button id="downloadBtn" class="w-full rounded-xl bg-emerald-600 text-white py-2.5 font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 text-sm">
+                <span class="material-symbols-outlined text-base">download</span>
+                下载当前 XLSX
+              </button>
+              <button id="downloadAllBtn" class="hidden w-full rounded-xl bg-indigo-600 text-white py-2.5 font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 text-sm" title="将每一组数据分别导出为 XLSX">
+                <span class="material-symbols-outlined text-base">download_for_offline</span>
+                下载全部结果
+              </button>
+            </div>
+            <div class="mt-3">
+              <button id="compareAllBtn" class="hidden w-full rounded-xl bg-fuchsia-600 text-white py-2.5 font-bold hover:bg-fuchsia-700 transition-colors flex items-center justify-center gap-2 text-sm" title="把所有已生成结果的数据组都加入对比区" disabled>
+                <span class="material-symbols-outlined text-base">library_add_check</span>
+                全部加入对比
+              </button>
             </div>
           </div>
-        </article>
+
+          <!-- 提示信息 -->
+          <div id="downloadTip" class="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 leading-relaxed">
+            请先选择项目并上传 CSV 文件。
+          </div>
+        </div>
       </section>
 
       <!-- 功耗采集数据结果预览（放到 CSV 原始预览之前） -->
-      <section class="mt-6 panel rounded-3xl p-5 legacy-analysis-section" id="processedSection">
+      <section class="mt-6 panel rounded-3xl p-5" id="processedSection">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 class="text-xl font-bold text-slate-900">功耗采集数据结果预览</h2>
@@ -612,7 +605,7 @@
       </section>
 
       <!-- CSV 原始预览（移动到结果预览下方） -->
-      <section class="mt-6 panel rounded-3xl p-5 legacy-analysis-section" id="csvPreviewSection">
+      <section class="mt-6 panel rounded-3xl p-5" id="csvPreviewSection">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 class="text-xl font-bold text-slate-900">CSV 原始数据预览</h2>
@@ -692,7 +685,7 @@
       </section>
 
       <!-- 历史操作记录 -->
-      <section class="mt-6 panel rounded-3xl p-6 legacy-analysis-section">
+      <section class="mt-6 panel rounded-3xl p-6">
         <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h2 class="text-2xl font-bold text-slate-900">历史操作记录</h2>
@@ -737,9 +730,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026092909"></script>
-    <script src="./supabase-auth.js?v=2026092909"></script>
-    <script src="./app.js?v=2026092909"></script>
+    <script src="./config.js?v=2026092908"></script>
+    <script src="./supabase-auth.js?v=2026092908"></script>
+    <script src="./app.js?v=2026092908"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
