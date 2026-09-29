@@ -9,11 +9,44 @@ async function getSupabaseClient() {
 }
 
 const GUEST_TEMPLATE_ID = 'guest_builtin_template';
+const LOCAL_TEMPLATE_META_KEY = 'power_analysis_local_templates_v1';
+function isStandaloneAdminMode() {
+  return Boolean(window.powerAuth && window.powerAuth.isStandaloneAdmin && window.powerAuth.isStandaloneAdmin());
+}
 function isGuestMode() {
   return Boolean(window.powerAuth && (
     (window.powerAuth.isGuest && window.powerAuth.isGuest())
-    || (window.powerAuth.isStandaloneAdmin && window.powerAuth.isStandaloneAdmin())
+    || isStandaloneAdminMode()
   ));
+}
+function readLocalTemplateMetadata() {
+  try {
+    const value = JSON.parse(localStorage.getItem(LOCAL_TEMPLATE_META_KEY) || '[]');
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+function writeLocalTemplateMetadata(items) {
+  localStorage.setItem(LOCAL_TEMPLATE_META_KEY, JSON.stringify(items));
+}
+async function storeLocalTemplateBuffer(record, buffer) {
+  await dbPut({
+    id: templateCacheKey(record.id, record.version),
+    templateId: record.id,
+    name: record.name,
+    fileName: record.fileName,
+    version: record.version,
+    size: buffer.byteLength,
+    updatedAt: record.updatedAt,
+    buffer,
+  });
+}
+async function removeLocalTemplateBuffers(templateId) {
+  const records = await dbGetAll();
+  await Promise.all(records
+    .filter((record) => record && record.templateId === templateId)
+    .map((record) => dbDelete(record.id)));
 }
 function getGuestTemplateRecord() {
   return {
@@ -67,6 +100,9 @@ function normalizeTemplateRow(rec) {
 
 const templateApi = {
   async list() {
+    if (isStandaloneAdminMode()) {
+      return readLocalTemplateMetadata().sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0));
+    }
     if (isGuestMode()) return [getGuestTemplateRecord()];
     const client = await getSupabaseClient();
     const { data, error } = await client.from('templates').select('*').order('created_at', { ascending: false });
@@ -74,6 +110,11 @@ const templateApi = {
     return (data || []).map(normalizeTemplateRow);
   },
   async get(id) {
+    if (isStandaloneAdminMode()) {
+      const record = readLocalTemplateMetadata().find((item) => item.id === id);
+      if (!record) throw new Error('未找到本地模板');
+      return record;
+    }
     if (isGuestMode()) {
       if (id !== GUEST_TEMPLATE_ID) throw new Error('游客无法查看团队模板');
       return getGuestTemplateRecord();
@@ -84,6 +125,12 @@ const templateApi = {
     return normalizeTemplateRow(data);
   },
   async download(id) {
+    if (isStandaloneAdminMode()) {
+      const record = await this.get(id);
+      const cached = await dbGet(templateCacheKey(record.id, record.version));
+      if (!cached || !cached.buffer) throw new Error('本地模板文件不存在，请重新上传');
+      return { buffer: cached.buffer, version: record.version, updatedAt: record.updatedAt, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+    }
     if (isGuestMode()) {
       if (id !== GUEST_TEMPLATE_ID) throw new Error('游客无法查看团队模板');
       const response = await fetch('./template.xlsx', { cache: 'force-cache' });
@@ -97,6 +144,26 @@ const templateApi = {
   },
   async upload({ file, name, fileName }) {
     if (!window.powerAuth.isAdmin()) throw new Error('只有管理员可以上传模板');
+    if (isStandaloneAdminMode()) {
+      const buffer = await file.arrayBuffer();
+      const now = new Date().toISOString();
+      const record = {
+        id: `local_${crypto.randomUUID()}`,
+        name,
+        project: name,
+        fileName: fileName || file.name,
+        sizeBytes: buffer.byteLength,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: 'standalone-admin',
+        updatedBy: 'standalone-admin',
+        data: {},
+      };
+      await storeLocalTemplateBuffer(record, buffer);
+      writeLocalTemplateMetadata([record, ...readLocalTemplateMetadata()]);
+      return record;
+    }
     const client = await getSupabaseClient();
     const user = window.powerAuth.getUser();
     const buffer = await file.arrayBuffer();
@@ -107,6 +174,32 @@ const templateApi = {
   },
   async update(id, { file, name, fileName } = {}) {
     if (!window.powerAuth.isAdmin()) throw new Error('只有管理员可以修改模板');
+    if (isStandaloneAdminMode()) {
+      const items = readLocalTemplateMetadata();
+      const index = items.findIndex((item) => item.id === id);
+      if (index < 0) throw new Error('未找到本地模板');
+      const current = items[index];
+      const now = new Date().toISOString();
+      const nextVersion = file ? Number(current.version || 1) + 1 : Number(current.version || 1);
+      const nextRecord = {
+        ...current,
+        name: name !== undefined && name !== null ? name : current.name,
+        project: name !== undefined && name !== null ? name : (current.project || current.name),
+        fileName: fileName || (file && file.name) || current.fileName,
+        version: nextVersion,
+        updatedAt: now,
+        updatedBy: 'standalone-admin',
+      };
+      if (file) {
+        const buffer = await file.arrayBuffer();
+        nextRecord.sizeBytes = buffer.byteLength;
+        await storeLocalTemplateBuffer(nextRecord, buffer);
+        await pruneStaleBlobCacheForTemplate(id, nextVersion);
+      }
+      items[index] = nextRecord;
+      writeLocalTemplateMetadata(items);
+      return nextRecord;
+    }
     const client = await getSupabaseClient();
     const current = await this.get(id);
     const payload = { ...(current.data || {}) };
@@ -130,6 +223,13 @@ const templateApi = {
   },
   async remove(id) {
     if (!window.powerAuth.isAdmin()) throw new Error('只有管理员可以删除模板');
+    if (isStandaloneAdminMode()) {
+      const items = readLocalTemplateMetadata();
+      if (!items.some((item) => item.id === id)) throw new Error('未找到本地模板');
+      writeLocalTemplateMetadata(items.filter((item) => item.id !== id));
+      await removeLocalTemplateBuffers(id);
+      return { ok: true };
+    }
     const client = await getSupabaseClient();
     const { error } = await client.from('templates').delete().eq('id', id);
     if (error) throw error;
