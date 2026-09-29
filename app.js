@@ -10,7 +10,10 @@ async function getSupabaseClient() {
 
 const GUEST_TEMPLATE_ID = 'guest_builtin_template';
 function isGuestMode() {
-  return Boolean(window.powerAuth && window.powerAuth.isGuest && window.powerAuth.isGuest());
+  return Boolean(window.powerAuth && (
+    (window.powerAuth.isGuest && window.powerAuth.isGuest())
+    || (window.powerAuth.isStandaloneAdmin && window.powerAuth.isStandaloneAdmin())
+  ));
 }
 function getGuestTemplateRecord() {
   return {
@@ -5623,10 +5626,12 @@ window.addEventListener('power-auth-change', async (event) => {
   const detail = event.detail || {};
   state.serverUser = detail.user
     ? { username: detail.user.email, email: detail.user.email, id: detail.user.id }
-    : (detail.guest ? { username: 'guest', email: '', id: '' } : null);
+    : (detail.guest
+      ? { username: 'guest', email: '', id: '' }
+      : (detail.standaloneAdmin ? { username: 'standalone-admin', email: '', id: 'standalone-admin' } : null));
   setAdminMode(Boolean(detail.isAdmin));
 
-  if (detail.guest) {
+  if (detail.guest || detail.standaloneAdmin) {
     state.templateItems = [];
     state.historyItems = [];
     state.activeProject = null;

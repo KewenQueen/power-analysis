@@ -4,14 +4,18 @@
   const key = config.supabasePublishableKey;
   const adminEmails = (config.adminEmails || []).map((email) => String(email).trim().toLowerCase()).filter(Boolean);
   const adminGithubLogins = (config.adminGithubLogins || []).map((login) => String(login).trim().toLowerCase()).filter(Boolean);
+  const STANDALONE_ADMIN_HASH = 'ee17a5c4f0d54f281ae1dba51b85a8652a39753dc06628b2a601c4d6eb53f619';
+  const STANDALONE_ADMIN_KEY = 'power_analysis_standalone_admin';
 
   let client = null;
   let currentUser = null;
   let guestMode = false;
+  let standaloneAdmin = sessionStorage.getItem(STANDALONE_ADMIN_KEY) === '1';
   let resolveReady;
   const ready = new Promise((resolve) => { resolveReady = resolve; });
 
   function isAdmin(user = currentUser) {
+    if (standaloneAdmin) return true;
     if (!user) return false;
     const email = String(user.email || '').trim().toLowerCase();
     const provider = String(user.app_metadata && user.app_metadata.provider || '').toLowerCase();
@@ -28,63 +32,12 @@
     el.classList.toggle('hidden', !message);
   }
 
-  function setRecoveryMessage(message, tone = 'error') {
-    const el = document.getElementById('recoveryPasswordMessage');
-    if (!el) return;
-    el.textContent = message || '';
-    el.classList.toggle('hidden', !message);
-    el.classList.toggle('text-red-600', tone === 'error');
-    el.classList.toggle('text-emerald-600', tone === 'success');
-  }
-
-  function openPasswordRecoveryModal() {
-    const modal = document.getElementById('passwordRecoveryModal');
-    const input = document.getElementById('recoveryPassword');
-    if (modal) modal.classList.remove('hidden');
-    setRecoveryMessage('');
-    if (input) requestAnimationFrame(() => input.focus({ preventScroll: true }));
-  }
-
-  async function saveRecoveryPassword() {
-    const passwordInput = document.getElementById('recoveryPassword');
-    const confirmInput = document.getElementById('recoveryPasswordConfirm');
-    const button = document.getElementById('recoveryPasswordSaveBtn');
-    const password = String(passwordInput && passwordInput.value || '');
-    const confirmation = String(confirmInput && confirmInput.value || '');
-    if (password.length < 6) {
-      setRecoveryMessage('新密码至少需要 6 位。');
-      passwordInput.focus({ preventScroll: true });
-      return;
-    }
-    if (password !== confirmation) {
-      setRecoveryMessage('两次输入的密码不一致。');
-      confirmInput.focus({ preventScroll: true });
-      return;
-    }
-    button.disabled = true;
-    button.textContent = '正在保存…';
-    setRecoveryMessage('');
-    try {
-      const { error } = await client.auth.updateUser({ password });
-      if (error) throw error;
-      passwordInput.value = '';
-      confirmInput.value = '';
-      setRecoveryMessage('密码设置成功，正在进入管理员页面…', 'success');
-      window.history.replaceState({}, document.title, `${window.location.origin}${window.location.pathname}`);
-      setTimeout(() => document.getElementById('passwordRecoveryModal').classList.add('hidden'), 900);
-    } catch (error) {
-      setRecoveryMessage(error && error.message ? error.message : '密码保存失败，请重新打开重置链接。');
-    } finally {
-      button.disabled = false;
-      button.textContent = '保存新密码';
-    }
-  }
-
   function render(session, options = {}) {
     currentUser = session && session.user ? session.user : null;
     if (typeof options.guest === 'boolean') guestMode = options.guest;
-    if (currentUser) guestMode = false;
-    const hasAccess = Boolean(currentUser || guestMode);
+    if (typeof options.standaloneAdmin === 'boolean') standaloneAdmin = options.standaloneAdmin;
+    if (currentUser || standaloneAdmin) guestMode = false;
+    const hasAccess = Boolean(currentUser || guestMode || standaloneAdmin);
     const gate = document.getElementById('authGate');
     const shell = document.getElementById('appShell');
     const email = document.getElementById('currentUserEmail');
@@ -93,9 +46,9 @@
     if (email) {
       const metadata = currentUser && currentUser.user_metadata || {};
       const identity = currentUser && (currentUser.email || metadata.user_name || metadata.preferred_username);
-      email.textContent = currentUser ? identity : (guestMode ? '游客模式 · 公共数据不可见' : '');
+      email.textContent = currentUser ? identity : (standaloneAdmin ? '独立管理员' : (guestMode ? '游客模式 · 公共数据不可见' : ''));
     }
-    window.dispatchEvent(new CustomEvent('power-auth-change', { detail: { user: currentUser, guest: guestMode, isAdmin: isAdmin() } }));
+    window.dispatchEvent(new CustomEvent('power-auth-change', { detail: { user: currentUser, guest: guestMode, isAdmin: isAdmin(), standaloneAdmin } }));
   }
 
   function enterGuestMode() {
@@ -126,33 +79,27 @@
     const passwordInput = document.getElementById('adminPasswordOnly');
     const button = document.getElementById('adminPasswordLoginBtn');
     const password = String(passwordInput && passwordInput.value || '');
-    const adminEmail = adminEmails[0] || '';
     if (!password) {
       setMessage('请输入管理员密码。', 'error');
       if (passwordInput) passwordInput.focus({ preventScroll: true });
       return;
     }
-    if (!adminEmail) {
-      setMessage('管理员账号尚未配置，请使用其他管理员登录方式。', 'error');
-      return;
-    }
     button.disabled = true;
-    button.innerHTML = '<span class="material-symbols-outlined">progress_activity</span> 正在登录…';
+    button.innerHTML = '<span class="material-symbols-outlined">progress_activity</span> 正在验证…';
     setMessage('');
     try {
-      const { data, error } = await client.auth.signInWithPassword({ email: adminEmail, password });
-      if (error) throw error;
-      if (!data || !data.user || !isAdmin(data.user)) {
-        await client.auth.signOut();
-        throw new Error('当前账号没有管理员权限。');
-      }
+      const bytes = new TextEncoder().encode(password);
+      const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+      const hash = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+      if (hash !== STANDALONE_ADMIN_HASH) throw new Error('invalid admin password');
+      standaloneAdmin = true;
+      sessionStorage.setItem(STANDALONE_ADMIN_KEY, '1');
       passwordInput.value = '';
+      render(currentUser ? { user: currentUser } : null, { standaloneAdmin: true });
       setMessage('管理员登录成功。', 'success');
     } catch (error) {
-      const message = error && error.message === '当前账号没有管理员权限。'
-        ? error.message
-        : '管理员密码不正确，请重试。';
-      setMessage(message, 'error');
+      console.warn('standalone admin login failed', error);
+      setMessage('管理员密码不正确，请重试。', 'error');
       passwordInput.select();
     } finally {
       button.disabled = false;
@@ -216,9 +163,6 @@
     const adminLoginOptions = document.getElementById('adminLoginOptions');
     const adminPasswordOnly = document.getElementById('adminPasswordOnly');
     const adminPasswordLoginBtn = document.getElementById('adminPasswordLoginBtn');
-    const recoveryPasswordInput = document.getElementById('recoveryPassword');
-    const recoveryPasswordConfirm = document.getElementById('recoveryPasswordConfirm');
-    const recoveryPasswordSaveBtn = document.getElementById('recoveryPasswordSaveBtn');
     let mode = 'login';
     const setMode = (next) => {
       mode = next;
@@ -240,12 +184,6 @@
     adminPasswordLoginBtn.addEventListener('click', signInWithAdminPassword);
     adminPasswordOnly.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') signInWithAdminPassword();
-    });
-    recoveryPasswordSaveBtn.addEventListener('click', saveRecoveryPassword);
-    [recoveryPasswordInput, recoveryPasswordConfirm].forEach((input) => {
-      input.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') saveRecoveryPassword();
-      });
     });
     document.getElementById('adminEmailLoginBtn').addEventListener('click', () => {
       setMode('login');
@@ -269,21 +207,26 @@
     });
     document.getElementById('guestModeBtn').addEventListener('click', enterGuestMode);
     document.getElementById('logoutBtn').addEventListener('click', async () => {
+      if (standaloneAdmin) {
+        standaloneAdmin = false;
+        sessionStorage.removeItem(STANDALONE_ADMIN_KEY);
+        if (!currentUser) {
+          render(null, { guest: false, standaloneAdmin: false });
+          return;
+        }
+      }
       if (guestMode) {
-        render(null, { guest: false });
+        render(null, { guest: false, standaloneAdmin: false });
         return;
       }
       await client.auth.signOut();
     });
 
-    const recoveryUrl = window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery');
     const { data } = await client.auth.getSession();
-    render(data.session, { guest: false });
-    if (data.session && recoveryUrl) openPasswordRecoveryModal();
+    render(data.session, { guest: false, standaloneAdmin });
     resolveReady(data.session);
-    client.auth.onAuthStateChange((event, session) => {
+    client.auth.onAuthStateChange((_event, session) => {
       render(session, { guest: guestMode && !session });
-      if (event === 'PASSWORD_RECOVERY') openPasswordRecoveryModal();
     });
   }
 
@@ -293,10 +236,16 @@
     getUser: () => currentUser,
     isGuest: () => guestMode,
     isAdmin,
+    isStandaloneAdmin: () => standaloneAdmin,
     signInWithGitHub,
     enterGuestMode,
     signOut: async () => {
-      if (guestMode) return render(null, { guest: false });
+      if (standaloneAdmin) {
+        standaloneAdmin = false;
+        sessionStorage.removeItem(STANDALONE_ADMIN_KEY);
+        if (!currentUser) return render(null, { guest: false, standaloneAdmin: false });
+      }
+      if (guestMode) return render(null, { guest: false, standaloneAdmin: false });
       return client ? client.auth.signOut() : Promise.resolve();
     },
   };
