@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026092902" />
+    <link rel="stylesheet" href="./style.css?v=2026092903" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -64,9 +64,18 @@
           <span class="auth-admin-chevron" aria-hidden="true">⌄</span>
         </button>
         <div id="adminLoginOptions" class="auth-admin-options hidden">
+          <div class="auth-admin-password-login">
+            <label for="adminPasswordOnly">管理员密码</label>
+            <input id="adminPasswordOnly" type="password" autocomplete="current-password" placeholder="请输入管理员密码" />
+            <button id="adminPasswordLoginBtn" type="button" class="auth-admin-option auth-admin-option-password">
+              <span class="material-symbols-outlined">key</span>
+              管理员密码登录
+            </button>
+          </div>
+          <div class="auth-admin-other-divider"><span>其他管理员登录方式</span></div>
           <button id="adminEmailLoginBtn" type="button" class="auth-admin-option">邮箱 + 密码登录</button>
           <button id="githubLoginBtn" type="button" class="auth-admin-option auth-admin-option-github">GitHub 账号登录</button>
-          <p class="auth-oauth-note">GitHub 密码仅在 GitHub 官方页面验证，本应用不会读取或保存。</p>
+          <p class="auth-oauth-note">管理员密码由 Supabase 安全校验，页面不会保存；GitHub 密码仅在 GitHub 官方页面验证。</p>
         </div>
         <p class="auth-footnote"><span class="material-symbols-outlined">lock</span> 账号由 Supabase Auth 安全托管</p>
       </div>
@@ -656,9 +665,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026092902"></script>
-    <script src="./supabase-auth.js?v=2026092902"></script>
-    <script src="./app.js?v=2026092902"></script>
+    <script src="./config.js?v=2026092903"></script>
+    <script src="./supabase-auth.js?v=2026092903"></script>
+    <script src="./app.js?v=2026092903"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

@@ -70,6 +70,44 @@
     }
   }
 
+  async function signInWithAdminPassword() {
+    const passwordInput = document.getElementById('adminPasswordOnly');
+    const button = document.getElementById('adminPasswordLoginBtn');
+    const password = String(passwordInput && passwordInput.value || '');
+    const adminEmail = adminEmails[0] || '';
+    if (!password) {
+      setMessage('请输入管理员密码。', 'error');
+      if (passwordInput) passwordInput.focus({ preventScroll: true });
+      return;
+    }
+    if (!adminEmail) {
+      setMessage('管理员账号尚未配置，请使用其他管理员登录方式。', 'error');
+      return;
+    }
+    button.disabled = true;
+    button.innerHTML = '<span class="material-symbols-outlined">progress_activity</span> 正在登录…';
+    setMessage('');
+    try {
+      const { data, error } = await client.auth.signInWithPassword({ email: adminEmail, password });
+      if (error) throw error;
+      if (!data || !data.user || !isAdmin(data.user)) {
+        await client.auth.signOut();
+        throw new Error('当前账号没有管理员权限。');
+      }
+      passwordInput.value = '';
+      setMessage('管理员登录成功。', 'success');
+    } catch (error) {
+      const message = error && error.message === '当前账号没有管理员权限。'
+        ? error.message
+        : '管理员密码不正确，请重试。';
+      setMessage(message, 'error');
+      passwordInput.select();
+    } finally {
+      button.disabled = false;
+      button.innerHTML = '<span class="material-symbols-outlined">key</span> 管理员密码登录';
+    }
+  }
+
   async function submit(mode) {
     const emailInput = document.getElementById('authEmail');
     const passwordInput = document.getElementById('authPassword');
@@ -124,6 +162,8 @@
     const passwordToggleBtn = document.getElementById('passwordToggleBtn');
     const adminLoginToggleBtn = document.getElementById('adminLoginToggleBtn');
     const adminLoginOptions = document.getElementById('adminLoginOptions');
+    const adminPasswordOnly = document.getElementById('adminPasswordOnly');
+    const adminPasswordLoginBtn = document.getElementById('adminPasswordLoginBtn');
     let mode = 'login';
     const setMode = (next) => {
       mode = next;
@@ -138,7 +178,13 @@
       adminLoginToggleBtn.setAttribute('aria-expanded', String(expanded));
     };
     adminLoginToggleBtn.addEventListener('click', () => {
-      setAdminOptions(adminLoginToggleBtn.getAttribute('aria-expanded') !== 'true');
+      const expanded = adminLoginToggleBtn.getAttribute('aria-expanded') !== 'true';
+      setAdminOptions(expanded);
+      if (expanded) requestAnimationFrame(() => adminPasswordOnly.focus({ preventScroll: true }));
+    });
+    adminPasswordLoginBtn.addEventListener('click', signInWithAdminPassword);
+    adminPasswordOnly.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') signInWithAdminPassword();
     });
     document.getElementById('adminEmailLoginBtn').addEventListener('click', () => {
       setMode('login');

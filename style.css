@@ -1775,7 +1775,16 @@ body.col-resizing {
 .auth-admin-toggle.expanded .auth-admin-chevron { transform: rotate(180deg); }
 .auth-admin-options { display: grid; gap: 9px; margin-top: 10px; padding: 12px; border: 1px solid #dbe3f1; border-radius: 15px; background: #f8faff; }
 .auth-admin-options.hidden { display: none; }
+.auth-admin-password-login { display: grid; gap: 8px; padding: 12px; border: 1px solid #c7d2fe; border-radius: 12px; background: linear-gradient(135deg, #eef2ff, #f8faff); }
+.auth-admin-password-login label { color: #4338ca; font-size: 12px; font-weight: 800; }
+.auth-admin-password-login input { width: 100%; border: 1px solid #c7d2fe; border-radius: 11px; padding: 11px 12px; background: #fff; color: #172033; outline: none; transition: border-color .2s ease, box-shadow .2s ease; }
+.auth-admin-password-login input:focus { border-color: #6366f1; box-shadow: 0 0 0 4px rgba(99, 102, 241, .12); }
 .auth-admin-option { width: 100%; border: 1px solid #c7d2fe; border-radius: 11px; padding: 11px 12px; color: #3730a3; background: #fff; font-weight: 800; cursor: pointer; transition: border-color .2s ease, background .2s ease, transform .2s ease; }
+.auth-admin-option-password { display: inline-flex; align-items: center; justify-content: center; gap: 7px; color: #fff; border-color: #4f46e5; background: linear-gradient(135deg, #4f46e5, #312e81); }
+.auth-admin-option.auth-admin-option-password:hover { color: #fff; border-color: #3730a3; background: linear-gradient(135deg, #4338ca, #1e1b4b); }
+.auth-admin-other-divider { display: flex; align-items: center; gap: 8px; color: #94a3b8; font-size: 11px; }
+.auth-admin-other-divider::before, .auth-admin-other-divider::after { content: ''; flex: 1; height: 1px; background: #dbe3f1; }
+.auth-admin-other-divider span { white-space: nowrap; }
 .auth-admin-option:hover { border-color: #818cf8; background: #eef2ff; transform: translateY(-1px); }
 .auth-admin-option:disabled { opacity: .65; cursor: wait; transform: none; }
 .auth-admin-option-github { color: #fff; border-color: #24292f; background: #24292f; }
