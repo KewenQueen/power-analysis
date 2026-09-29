@@ -1,12 +1,13 @@
-const CACHE_VERSION = 'power-analysis-pwa-v7';
+const CACHE_VERSION = 'power-analysis-pwa-v8';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/style.css?v=2026091806',
-  '/config.js?v=2026091806',
-  '/supabase-auth.js?v=2026091806',
-  '/app.js?v=2026091806',
+  '/style.css?v=2026092901',
+  '/config.js?v=2026092901',
+  '/supabase-auth.js?v=2026092901',
+  '/app.js?v=2026092901',
+  './template.xlsx',
   '/icon-192.svg',
   '/icon-512.svg'
 ];

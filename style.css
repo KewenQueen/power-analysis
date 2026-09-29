@@ -203,6 +203,8 @@ body:not(.is-admin) .top-guide-card {
   white-space: nowrap;
 }
 .status-chip-sm { padding: 0.25rem 0.55rem; font-size: 0.7rem; }
+.status-chip.status-success { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+.status-chip.status-error { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
 
 /* ============================================================
    COMPACT TABLES (both CSV preview and processed preview)
@@ -429,6 +431,141 @@ button:disabled:hover { filter: none; }
   font-size: 0.72rem;
   color: #475569;
   margin-top: 0.2rem;
+}
+
+/* ============================================================
+   TEMPLATE BUILDER — browser-side spreadsheet editor
+   ============================================================ */
+.template-builder-section {
+  overflow: hidden;
+}
+
+.template-builder-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.template-builder-name-field {
+  flex: 1 1 280px;
+  max-width: 520px;
+}
+
+.template-builder-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.template-builder-table-wrap {
+  max-height: 520px;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.template-builder-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.72rem;
+}
+
+.template-builder-table th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-width: 132px;
+  padding: 0.45rem 0.55rem;
+  border-right: 1px solid #c7d2fe;
+  border-bottom: 1px solid #c7d2fe;
+  background: #eef2ff;
+  color: #3730a3;
+  font-weight: 800;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.template-builder-table th:first-child {
+  left: 0;
+  z-index: 5;
+  min-width: 58px;
+  width: 58px;
+  text-align: center;
+}
+
+.template-builder-table td {
+  min-width: 132px;
+  padding: 0;
+  border-right: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.template-builder-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 58px;
+  width: 58px;
+  padding: 0.25rem;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.template-builder-cell {
+  width: 100%;
+  min-width: 132px;
+  min-height: 36px;
+  padding: 0.45rem 0.55rem;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #0f172a;
+}
+
+.template-builder-cell:focus {
+  background: #eef2ff;
+  box-shadow: inset 0 0 0 2px #818cf8;
+}
+
+.template-builder-delete-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: #94a3b8;
+  transition: all 0.15s ease;
+}
+
+.template-builder-delete-row:hover {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.template-builder-loading {
+  padding: 2.5rem !important;
+  text-align: center;
+  color: #64748b;
+}
+
+@media (max-width: 640px) {
+  .template-builder-actions,
+  .template-builder-actions .template-btn {
+    width: 100%;
+  }
+  .template-builder-actions .template-btn {
+    justify-content: center;
+  }
 }
 
 @media (max-width: 768px) {

@@ -165,6 +165,11 @@ clearTransientCaches();
 
 const TARGET_SHEET_NAME = '6-QEPM原始数据';
 const PREVIEW_SHEET_NAME = '3_功耗采集数据表';
+const TEMPLATE_BUILDER_STORAGE_KEY = 'qepm_template_builder_draft_v1';
+const TEMPLATE_BUILDER_COLUMN_COUNT = 13;
+const TEMPLATE_BUILDER_START_ROW = 2;
+const TEMPLATE_BUILDER_END_ROW = 138;
+const TEMPLATE_BUILDER_MAX_ROWS = 300;
 const DB_NAME = 'qepm_template_store';
 const DB_VERSION = 2;
 const STORE_NAME = 'templates';
@@ -327,6 +332,14 @@ const state = {
   templatesLoadError: null,
   historyItems: [],
 
+  // Browser-side data breakdown template builder
+  templateBuilder: {
+    projectName: '',
+    rows: [],
+    ready: false,
+    saveTimer: null,
+  },
+
   // Compare groups (in-memory). Each group is an independent comparison table.
   // { id, name, snapshots: [], highlightDiff: false }
   compareGroups: [{ id: 'grp_init', name: '对比组 1', snapshots: [], highlightDiff: false }],
@@ -383,6 +396,15 @@ const els = {
   templatePageInfo: document.getElementById('templatePageInfo'),
   templatePrevBtn: document.getElementById('templatePrevBtn'),
   templateNextBtn: document.getElementById('templateNextBtn'),
+  // Template builder
+  templateBuilderProjectName: document.getElementById('templateBuilderProjectName'),
+  templateBuilderStatus: document.getElementById('templateBuilderStatus'),
+  templateBuilderHead: document.getElementById('templateBuilderHead'),
+  templateBuilderBody: document.getElementById('templateBuilderBody'),
+  templateBuilderSummary: document.getElementById('templateBuilderSummary'),
+  templateBuilderAddRow: document.getElementById('templateBuilderAddRow'),
+  templateBuilderReset: document.getElementById('templateBuilderReset'),
+  templateBuilderExport: document.getElementById('templateBuilderExport'),
   // Admin
   adminModal: document.getElementById('adminModal'),
   templateRenameModal: document.getElementById('templateRenameModal'),
@@ -2432,6 +2454,227 @@ function handleDatasetProjectChange(dsId, projectId) {
   if (ds.id === state.activeDatasetId) syncActiveDatasetToState();
   updateSummary();
   renderPreview();
+}
+
+// ---------- Data breakdown template builder ----------
+function setTemplateBuilderStatus(text, tone = 'default') {
+  if (!els.templateBuilderStatus) return;
+  els.templateBuilderStatus.textContent = text;
+  els.templateBuilderStatus.classList.toggle('status-success', tone === 'success');
+  els.templateBuilderStatus.classList.toggle('status-error', tone === 'error');
+}
+
+function templateBuilderColumnName(index) {
+  let n = index + 1;
+  let label = '';
+  while (n > 0) {
+    n -= 1;
+    label = String.fromCharCode(65 + (n % 26)) + label;
+    n = Math.floor(n / 26);
+  }
+  return label;
+}
+
+function normalizeTemplateBuilderRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.slice(0, TEMPLATE_BUILDER_MAX_ROWS).map((row) => {
+    const values = Array.isArray(row) ? row.slice(0, TEMPLATE_BUILDER_COLUMN_COUNT) : [];
+    while (values.length < TEMPLATE_BUILDER_COLUMN_COUNT) values.push('');
+    return values.map((value) => value === null || value === undefined ? '' : String(value));
+  });
+}
+
+function renderTemplateBuilder() {
+  if (!els.templateBuilderHead || !els.templateBuilderBody) return;
+  const rows = state.templateBuilder.rows;
+  els.templateBuilderHead.innerHTML = '<th scope="col">行</th>' + Array.from(
+    { length: TEMPLATE_BUILDER_COLUMN_COUNT },
+    (_, col) => `<th scope="col">${templateBuilderColumnName(col)}</th>`
+  ).join('');
+  els.templateBuilderBody.innerHTML = rows.map((row, rowIndex) => `
+    <tr>
+      <td>
+        <button class="template-builder-delete-row" type="button" data-builder-action="delete-row" data-row="${rowIndex}" title="删除第 ${rowIndex + TEMPLATE_BUILDER_START_ROW} 行" ${rowIndex === 0 ? 'disabled' : ''}>
+          <span class="material-symbols-outlined text-sm">${rowIndex === 0 ? 'lock' : 'delete'}</span>
+        </button>
+      </td>
+      ${row.map((value, colIndex) => `<td><input class="template-builder-cell" data-row="${rowIndex}" data-col="${colIndex}" value="${escapeHtml(value)}" aria-label="${templateBuilderColumnName(colIndex)}${rowIndex + TEMPLATE_BUILDER_START_ROW}" /></td>`).join('')}
+    </tr>
+  `).join('');
+  if (els.templateBuilderProjectName) els.templateBuilderProjectName.value = state.templateBuilder.projectName;
+  if (els.templateBuilderSummary) {
+    els.templateBuilderSummary.textContent = `当前 ${rows.length} 行 × ${TEMPLATE_BUILDER_COLUMN_COUNT} 列 · 对应 Excel 第 ${TEMPLATE_BUILDER_START_ROW}-${Math.max(TEMPLATE_BUILDER_START_ROW, rows.length + TEMPLATE_BUILDER_START_ROW - 1)} 行`;
+  }
+}
+
+function persistTemplateBuilderDraft() {
+  if (!state.templateBuilder.ready) return;
+  try {
+    localStorage.setItem(TEMPLATE_BUILDER_STORAGE_KEY, JSON.stringify({
+      projectName: state.templateBuilder.projectName,
+      rows: state.templateBuilder.rows,
+      savedAt: Date.now(),
+    }));
+    setTemplateBuilderStatus('已自动保存', 'success');
+  } catch (error) {
+    console.warn('template builder draft save failed', error);
+    setTemplateBuilderStatus('草稿保存失败', 'error');
+  }
+}
+
+function scheduleTemplateBuilderSave() {
+  clearTimeout(state.templateBuilder.saveTimer);
+  setTemplateBuilderStatus('正在保存…');
+  state.templateBuilder.saveTimer = setTimeout(persistTemplateBuilderDraft, 350);
+}
+
+async function loadBaseTemplateBuilderRows() {
+  const response = await fetch('./template.xlsx', { cache: 'no-cache' });
+  if (!response.ok) throw new Error('标准模板加载失败');
+  const workbook = await XlsxPopulate.fromDataAsync(await response.arrayBuffer());
+  const sheet = workbook.sheet(PREVIEW_SHEET_NAME);
+  if (!sheet) throw new Error(`标准模板缺少工作表：${PREVIEW_SHEET_NAME}`);
+  const rows = [];
+  for (let row = TEMPLATE_BUILDER_START_ROW; row <= TEMPLATE_BUILDER_END_ROW; row += 1) {
+    const values = [];
+    for (let col = 1; col <= TEMPLATE_BUILDER_COLUMN_COUNT; col += 1) {
+      const cell = sheet.cell(row, col);
+      let value = '';
+      try {
+        const formula = cell.formula();
+        value = formula ? `=${String(formula).replace(/^=/, '')}` : cell.value();
+      } catch {
+        value = cell.value();
+      }
+      values.push(value === null || value === undefined ? '' : String(value));
+    }
+    rows.push(values);
+  }
+  const cover = workbook.sheet('0-封面');
+  const projectName = cover ? String(cover.cell('B7').value() || '') : '';
+  return { projectName, rows };
+}
+
+async function initTemplateBuilder(forceReset = false) {
+  if (!els.templateBuilderBody) return;
+  setTemplateBuilderStatus('正在加载基础模板');
+  try {
+    let draft = null;
+    if (!forceReset) {
+      try { draft = JSON.parse(localStorage.getItem(TEMPLATE_BUILDER_STORAGE_KEY) || 'null'); } catch { draft = null; }
+    }
+    if (draft && Array.isArray(draft.rows) && draft.rows.length) {
+      state.templateBuilder.projectName = String(draft.projectName || '');
+      state.templateBuilder.rows = normalizeTemplateBuilderRows(draft.rows);
+    } else {
+      const base = await loadBaseTemplateBuilderRows();
+      state.templateBuilder.projectName = base.projectName;
+      state.templateBuilder.rows = normalizeTemplateBuilderRows(base.rows);
+    }
+    state.templateBuilder.ready = true;
+    renderTemplateBuilder();
+    persistTemplateBuilderDraft();
+  } catch (error) {
+    console.error(error);
+    state.templateBuilder.ready = false;
+    els.templateBuilderBody.innerHTML = `<tr><td class="template-builder-loading">${escapeHtml(error.message || '编辑器加载失败，请刷新后重试。')}</td></tr>`;
+    setTemplateBuilderStatus('加载失败', 'error');
+  }
+}
+
+function addTemplateBuilderRow() {
+  if (!state.templateBuilder.ready) return;
+  if (state.templateBuilder.rows.length >= TEMPLATE_BUILDER_MAX_ROWS) {
+    alert(`最多支持 ${TEMPLATE_BUILDER_MAX_ROWS} 行。`);
+    return;
+  }
+  state.templateBuilder.rows.push(Array(TEMPLATE_BUILDER_COLUMN_COUNT).fill(''));
+  renderTemplateBuilder();
+  scheduleTemplateBuilderSave();
+  const wrap = document.getElementById('templateBuilderTableWrap');
+  if (wrap) requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
+}
+
+function deleteTemplateBuilderRow(rowIndex) {
+  if (!state.templateBuilder.ready || rowIndex <= 0 || rowIndex >= state.templateBuilder.rows.length) return;
+  state.templateBuilder.rows.splice(rowIndex, 1);
+  renderTemplateBuilder();
+  scheduleTemplateBuilderSave();
+}
+
+async function resetTemplateBuilder() {
+  if (!confirm('确定恢复标准模板吗？当前在线编辑内容将被覆盖。')) return;
+  localStorage.removeItem(TEMPLATE_BUILDER_STORAGE_KEY);
+  state.templateBuilder.ready = false;
+  els.templateBuilderBody.innerHTML = '<tr><td class="template-builder-loading">正在恢复标准模板…</td></tr>';
+  await initTemplateBuilder(true);
+}
+
+function safeTemplateFileName(projectName) {
+  const safe = String(projectName || '未命名项目').trim().replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '_');
+  return `${safe || '未命名项目'}_数据拆解模板.xlsx`;
+}
+
+async function exportTemplateBuilderWorkbook() {
+  if (!state.templateBuilder.ready) {
+    alert('模板编辑器尚未加载完成，请稍后再试。');
+    return;
+  }
+  const projectName = String(state.templateBuilder.projectName || '').trim();
+  if (!projectName) {
+    alert('请先填写项目名称。');
+    if (els.templateBuilderProjectName) els.templateBuilderProjectName.focus();
+    return;
+  }
+  const original = els.templateBuilderExport.innerHTML;
+  els.templateBuilderExport.disabled = true;
+  els.templateBuilderExport.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span> 正在生成';
+  setTemplateBuilderStatus('正在生成文件…');
+  try {
+    const response = await fetch('./template.xlsx', { cache: 'no-cache' });
+    if (!response.ok) throw new Error('标准模板加载失败');
+    const workbook = await XlsxPopulate.fromDataAsync(await response.arrayBuffer());
+    const sheet = workbook.sheet(PREVIEW_SHEET_NAME);
+    if (!sheet) throw new Error(`标准模板缺少工作表：${PREVIEW_SHEET_NAME}`);
+    const cover = workbook.sheet('0-封面');
+    if (cover) cover.cell('B7').value(projectName);
+
+    const clearEndRow = Math.max(TEMPLATE_BUILDER_END_ROW, state.templateBuilder.rows.length + TEMPLATE_BUILDER_START_ROW - 1);
+    for (let row = TEMPLATE_BUILDER_START_ROW; row <= clearEndRow; row += 1) {
+      for (let col = 1; col <= TEMPLATE_BUILDER_COLUMN_COUNT; col += 1) sheet.cell(row, col).value(null);
+    }
+    state.templateBuilder.rows.forEach((values, rowIndex) => {
+      values.forEach((value, colIndex) => {
+        const cell = sheet.cell(rowIndex + TEMPLATE_BUILDER_START_ROW, colIndex + 1);
+        if (typeof value === 'string' && value.startsWith('=')) {
+          cell.formula(value.slice(1));
+        } else if (typeof value === 'string' && value.trim() !== '' && /^-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value.trim())) {
+          cell.value(Number(value));
+        } else {
+          cell.value(value);
+        }
+      });
+    });
+    forceFullCalcOnLoad(workbook);
+    const blob = await workbook.outputAsync();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = safeTemplateFileName(projectName);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    persistTemplateBuilderDraft();
+    setTemplateBuilderStatus('导出完成', 'success');
+  } catch (error) {
+    console.error(error);
+    setTemplateBuilderStatus('生成失败', 'error');
+    alert(`模板生成失败：${error.message || '未知错误'}`);
+  } finally {
+    els.templateBuilderExport.disabled = false;
+    els.templateBuilderExport.innerHTML = original;
+  }
 }
 
 // ---------- Template list: pagination + views ----------
@@ -5002,6 +5245,31 @@ function bindEvents() {
   els.templateUploadBack.addEventListener('click', () => switchTemplateView('list'));
   els.templateNewBtn.addEventListener('click', () => { if (!state.isAdmin) { alert('只有管理员可以上传模板。'); return; } switchTemplateView('upload'); });
 
+  if (els.templateBuilderProjectName) {
+    els.templateBuilderProjectName.addEventListener('input', (event) => {
+      state.templateBuilder.projectName = event.target.value;
+      scheduleTemplateBuilderSave();
+    });
+  }
+  if (els.templateBuilderBody) {
+    els.templateBuilderBody.addEventListener('input', (event) => {
+      const cell = event.target.closest('.template-builder-cell');
+      if (!cell) return;
+      const row = Number(cell.dataset.row);
+      const col = Number(cell.dataset.col);
+      if (!state.templateBuilder.rows[row] || !Number.isInteger(col)) return;
+      state.templateBuilder.rows[row][col] = cell.value;
+      scheduleTemplateBuilderSave();
+    });
+    els.templateBuilderBody.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-builder-action="delete-row"]');
+      if (button) deleteTemplateBuilderRow(Number(button.dataset.row));
+    });
+  }
+  if (els.templateBuilderAddRow) els.templateBuilderAddRow.addEventListener('click', addTemplateBuilderRow);
+  if (els.templateBuilderReset) els.templateBuilderReset.addEventListener('click', resetTemplateBuilder);
+  if (els.templateBuilderExport) els.templateBuilderExport.addEventListener('click', exportTemplateBuilderWorkbook);
+
   els.templatePrevBtn.addEventListener('click', () => { if (state.templatePage > 1) { state.templatePage -= 1; renderTemplateListPage(); } });
   els.templateNextBtn.addEventListener('click', () => {
     const totalPages = Math.max(1, Math.ceil(state.templateItems.length / TEMPLATE_PAGE_SIZE));
@@ -5324,6 +5592,7 @@ window.addEventListener('pageshow', (event) => {
   if (event.persisted) window.location.reload();
 });
 bindEvents();
+initTemplateBuilder();
 window.__QEP_APP_READY__ = true;
 clearTransientCaches();
 setAdminMode(false);
