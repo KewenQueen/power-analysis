@@ -154,7 +154,9 @@ function clearTransientCaches() {
     }
     removeKeys.forEach((key) => localStorage.removeItem(key));
     Object.keys(keepValues).forEach((key) => localStorage.setItem(key, keepValues[key]));
+    const standaloneAdminSession = sessionStorage.getItem('power_analysis_standalone_admin');
     sessionStorage.clear();
+    if (standaloneAdminSession) sessionStorage.setItem('power_analysis_standalone_admin', standaloneAdminSession);
     // 保留 IndexedDB 模板库 qepm_template_store 与历史缓存 qepm_history_store：
     // 模板与历史结果都需要跨刷新保留，避免模板丢失或历史回溯能力失效。
     if (typeof window !== 'undefined' && window.__QEP_APP_READY__ && typeof resetWorkspaceState === 'function') {
