@@ -356,8 +356,9 @@ const TEMPLATE_PAGE_SIZE = 5;
 // Compare snapshots
 const COMPARE_MAX = 10;
 
-// Batch upload cap
+// Batch upload caps
 const BATCH_MAX = 8;
+const DATA_EXPORT_MAX_FILES = 50;
 
 // Compare column semantics for the 功耗采集数据表 (0-based sheet column indices):
 //  - columns [0, 13)  => A..M common headers (M = 采样通道编号 QEPM)
@@ -2898,7 +2899,7 @@ async function handleDataExportFiles(fileList) {
   if (!template) { alert('请先在第一步选择项目模板，再导入文件。'); return; }
   const files = Array.from(fileList || []).filter((file) => file && /\.(csv|xlsx)$/i.test(file.name));
   if (!files.length) { alert('请选择 .csv 或 .xlsx 格式文件。'); return; }
-  if (files.length > BATCH_MAX) { alert(`一次最多导入 ${BATCH_MAX} 个文件。`); return; }
+  if (files.length > DATA_EXPORT_MAX_FILES) { alert(`一次最多导入 ${DATA_EXPORT_MAX_FILES} 个文件。`); return; }
 
   const results = await Promise.all(files.map(async (file) => {
     try {
