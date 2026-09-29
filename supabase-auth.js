@@ -28,6 +28,58 @@
     el.classList.toggle('hidden', !message);
   }
 
+  function setRecoveryMessage(message, tone = 'error') {
+    const el = document.getElementById('recoveryPasswordMessage');
+    if (!el) return;
+    el.textContent = message || '';
+    el.classList.toggle('hidden', !message);
+    el.classList.toggle('text-red-600', tone === 'error');
+    el.classList.toggle('text-emerald-600', tone === 'success');
+  }
+
+  function openPasswordRecoveryModal() {
+    const modal = document.getElementById('passwordRecoveryModal');
+    const input = document.getElementById('recoveryPassword');
+    if (modal) modal.classList.remove('hidden');
+    setRecoveryMessage('');
+    if (input) requestAnimationFrame(() => input.focus({ preventScroll: true }));
+  }
+
+  async function saveRecoveryPassword() {
+    const passwordInput = document.getElementById('recoveryPassword');
+    const confirmInput = document.getElementById('recoveryPasswordConfirm');
+    const button = document.getElementById('recoveryPasswordSaveBtn');
+    const password = String(passwordInput && passwordInput.value || '');
+    const confirmation = String(confirmInput && confirmInput.value || '');
+    if (password.length < 6) {
+      setRecoveryMessage('新密码至少需要 6 位。');
+      passwordInput.focus({ preventScroll: true });
+      return;
+    }
+    if (password !== confirmation) {
+      setRecoveryMessage('两次输入的密码不一致。');
+      confirmInput.focus({ preventScroll: true });
+      return;
+    }
+    button.disabled = true;
+    button.textContent = '正在保存…';
+    setRecoveryMessage('');
+    try {
+      const { error } = await client.auth.updateUser({ password });
+      if (error) throw error;
+      passwordInput.value = '';
+      confirmInput.value = '';
+      setRecoveryMessage('密码设置成功，正在进入管理员页面…', 'success');
+      window.history.replaceState({}, document.title, `${window.location.origin}${window.location.pathname}`);
+      setTimeout(() => document.getElementById('passwordRecoveryModal').classList.add('hidden'), 900);
+    } catch (error) {
+      setRecoveryMessage(error && error.message ? error.message : '密码保存失败，请重新打开重置链接。');
+    } finally {
+      button.disabled = false;
+      button.textContent = '保存新密码';
+    }
+  }
+
   function render(session, options = {}) {
     currentUser = session && session.user ? session.user : null;
     if (typeof options.guest === 'boolean') guestMode = options.guest;
@@ -164,6 +216,9 @@
     const adminLoginOptions = document.getElementById('adminLoginOptions');
     const adminPasswordOnly = document.getElementById('adminPasswordOnly');
     const adminPasswordLoginBtn = document.getElementById('adminPasswordLoginBtn');
+    const recoveryPasswordInput = document.getElementById('recoveryPassword');
+    const recoveryPasswordConfirm = document.getElementById('recoveryPasswordConfirm');
+    const recoveryPasswordSaveBtn = document.getElementById('recoveryPasswordSaveBtn');
     let mode = 'login';
     const setMode = (next) => {
       mode = next;
@@ -185,6 +240,12 @@
     adminPasswordLoginBtn.addEventListener('click', signInWithAdminPassword);
     adminPasswordOnly.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') signInWithAdminPassword();
+    });
+    recoveryPasswordSaveBtn.addEventListener('click', saveRecoveryPassword);
+    [recoveryPasswordInput, recoveryPasswordConfirm].forEach((input) => {
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') saveRecoveryPassword();
+      });
     });
     document.getElementById('adminEmailLoginBtn').addEventListener('click', () => {
       setMode('login');
@@ -215,10 +276,15 @@
       await client.auth.signOut();
     });
 
+    const recoveryUrl = window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery');
     const { data } = await client.auth.getSession();
     render(data.session, { guest: false });
+    if (data.session && recoveryUrl) openPasswordRecoveryModal();
     resolveReady(data.session);
-    client.auth.onAuthStateChange((_event, session) => render(session, { guest: guestMode && !session }));
+    client.auth.onAuthStateChange((event, session) => {
+      render(session, { guest: guestMode && !session });
+      if (event === 'PASSWORD_RECOVERY') openPasswordRecoveryModal();
+    });
   }
 
   window.powerAuth = {
