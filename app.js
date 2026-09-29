@@ -403,8 +403,6 @@ const els = {
   templateNextBtn: document.getElementById('templateNextBtn'),
   // Template builder
   templateBuilderPage: document.getElementById('templateBuilderPage'),
-  templateBuilderOpen: document.getElementById('templateBuilderOpen'),
-  templateBuilderBack: document.getElementById('templateBuilderBack'),
   templateBuilderProjectName: document.getElementById('templateBuilderProjectName'),
   templateBuilderStatus: document.getElementById('templateBuilderStatus'),
   templateBuilderHead: document.getElementById('templateBuilderHead'),
@@ -2464,21 +2462,25 @@ function handleDatasetProjectChange(dsId, projectId) {
   renderPreview();
 }
 
+// ---------- Feature page navigation ----------
+async function openFeaturePage(targetId) {
+  const target = document.getElementById(targetId);
+  if (!target || !target.classList.contains('feature-page')) return;
+  document.querySelectorAll('.feature-page').forEach((page) => page.classList.add('hidden'));
+  document.body.classList.add('feature-page-mode');
+  target.classList.remove('hidden');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (targetId === 'templateBuilderPage' && !state.templateBuilder.ready) await initTemplateBuilder();
+  if (targetId === 'projectTemplatePage') switchTemplateView('list');
+}
+
+function closeFeaturePage() {
+  document.body.classList.remove('feature-page-mode');
+  document.querySelectorAll('.feature-page').forEach((page) => page.classList.add('hidden'));
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 // ---------- Data breakdown template builder ----------
-async function openTemplateBuilderPage() {
-  if (!els.templateBuilderPage) return;
-  document.body.classList.add('template-builder-mode');
-  els.templateBuilderPage.classList.remove('hidden');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-  if (!state.templateBuilder.ready) await initTemplateBuilder();
-}
-
-function closeTemplateBuilderPage() {
-  document.body.classList.remove('template-builder-mode');
-  if (els.templateBuilderPage) els.templateBuilderPage.classList.add('hidden');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
 function setTemplateBuilderStatus(text, tone = 'default') {
   if (!els.templateBuilderStatus) return;
   els.templateBuilderStatus.textContent = text;
@@ -5267,8 +5269,12 @@ function bindEvents() {
   els.templateUploadBack.addEventListener('click', () => switchTemplateView('list'));
   els.templateNewBtn.addEventListener('click', () => { if (!state.isAdmin) { alert('只有管理员可以上传模板。'); return; } switchTemplateView('upload'); });
 
-  if (els.templateBuilderOpen) els.templateBuilderOpen.addEventListener('click', openTemplateBuilderPage);
-  if (els.templateBuilderBack) els.templateBuilderBack.addEventListener('click', closeTemplateBuilderPage);
+  document.querySelectorAll('[data-feature-target]').forEach((button) => {
+    button.addEventListener('click', () => openFeaturePage(button.dataset.featureTarget));
+  });
+  document.querySelectorAll('[data-feature-back]').forEach((button) => {
+    button.addEventListener('click', closeFeaturePage);
+  });
   if (els.templateBuilderProjectName) {
     els.templateBuilderProjectName.addEventListener('input', (event) => {
       state.templateBuilder.projectName = event.target.value;
@@ -5657,6 +5663,7 @@ window.addEventListener('power-auth-change', async (event) => {
     state.activeProject = null;
     renderHistory();
     refreshProjectSelect([]);
+    closeFeaturePage();
     return;
   }
   try {

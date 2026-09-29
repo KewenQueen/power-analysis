@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026092906" />
+    <link rel="stylesheet" href="./style.css?v=2026092907" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -119,8 +119,8 @@
         </div>
       </div>
 
-      <!-- 操作步骤 + 项目模板管理 -->
-      <section class="top-dual-section grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- 操作指南 -->
+      <section id="homeGuideSection" class="top-dual-section">
         <div class="guide-card top-guide-card rounded-3xl p-5">
           <details class="guide-details">
             <summary class="guide-summary">
@@ -209,6 +209,55 @@
             </div>
           </details>
         </div>
+      </section>
+
+      <!-- 四个功能入口 -->
+      <section id="homeFeatureGrid" class="feature-entry-grid mt-6">
+        <button type="button" class="feature-entry-card feature-entry-indigo" data-feature-target="templateBuilderPage">
+          <span class="feature-entry-icon"><span class="material-symbols-outlined">table_edit</span></span>
+          <span class="feature-entry-content">
+            <strong>拆解模板生成</strong>
+            <small>在线编辑拆解配置并自动生成 Excel 模板</small>
+          </span>
+          <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
+        </button>
+        <button type="button" class="feature-entry-card feature-entry-blue" data-feature-target="projectTemplatePage">
+          <span class="feature-entry-icon"><span class="material-symbols-outlined">folder_managed</span></span>
+          <span class="feature-entry-content">
+            <strong>项目模板管理</strong>
+            <small>上传、下载、替换与管理项目模板</small>
+          </span>
+          <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
+        </button>
+        <button type="button" class="feature-entry-card feature-entry-emerald" data-feature-target="comparisonAnalysisPage">
+          <span class="feature-entry-icon"><span class="material-symbols-outlined">query_stats</span></span>
+          <span class="feature-entry-content">
+            <strong>拆解数据对比分析</strong>
+            <small>导入 CSV、生成结果并完成多项目对比</small>
+          </span>
+          <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
+        </button>
+        <button type="button" class="feature-entry-card feature-entry-amber" data-feature-target="dataExportPage">
+          <span class="feature-entry-icon"><span class="material-symbols-outlined">file_export</span></span>
+          <span class="feature-entry-content">
+            <strong>拆解数据导出</strong>
+            <small>独立的数据导出能力即将上线</small>
+          </span>
+          <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
+        </button>
+      </section>
+
+      <!-- 项目模板管理二级页面 -->
+      <section id="projectTemplatePage" class="hidden feature-page">
+        <div class="feature-page-header">
+          <button type="button" class="template-btn template-btn-secondary" data-feature-back>
+            <span class="material-symbols-outlined text-sm">arrow_back</span> 返回主页面
+          </button>
+          <div>
+            <h2>项目模板管理</h2>
+            <p>上传、下载、替换、重命名或删除项目模板。</p>
+          </div>
+        </div>
 
         <!-- 紧凑的项目模板管理面板（仅管理员可见） -->
         <div class="panel panel-compact rounded-3xl p-4 admin-only-panel">
@@ -284,31 +333,16 @@
         </div>
       </section>
 
-      <!-- 生成数据拆解模板入口 -->
-      <section id="templateBuilderEntry" class="mt-6 panel rounded-3xl p-5 template-builder-entry">
-        <div class="flex items-center justify-between gap-4 flex-wrap">
-          <div class="flex items-start gap-3 min-w-0">
-            <div class="w-11 h-11 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center flex-shrink-0">
-              <span class="material-symbols-outlined">table_edit</span>
-            </div>
-            <div>
-              <h2 class="text-lg font-bold text-slate-900">生成数据拆解模板</h2>
-              <p class="mt-1 text-xs text-slate-500">进入专属编辑页，自定义项目名称、在线编辑拆解配置并导出 Excel。</p>
-            </div>
-          </div>
-          <button id="templateBuilderOpen" class="template-btn template-btn-primary template-builder-entry-btn" type="button">
-            开始生成
-            <span class="material-symbols-outlined text-sm">arrow_forward</span>
-          </button>
-        </div>
-      </section>
-
-      <!-- 生成数据拆解模板编辑页 -->
-      <section id="templateBuilderPage" class="hidden template-builder-page">
-        <div class="mb-4">
-          <button id="templateBuilderBack" class="template-btn template-btn-secondary" type="button">
+      <!-- 生成数据拆解模板二级页面 -->
+      <section id="templateBuilderPage" class="hidden feature-page template-builder-page">
+        <div class="feature-page-header">
+          <button id="templateBuilderBack" class="template-btn template-btn-secondary" type="button" data-feature-back>
             <span class="material-symbols-outlined text-sm">arrow_back</span> 返回主页面
           </button>
+          <div>
+            <h2>拆解模板生成</h2>
+            <p>自定义项目名称并在线编辑拆解配置。</p>
+          </div>
         </div>
         <div class="panel rounded-3xl p-5 template-builder-section">
           <div class="flex items-start justify-between gap-3 flex-wrap">
@@ -363,6 +397,18 @@
           </div>
         </div>
       </section>
+
+      <!-- 拆解数据对比分析二级页面 -->
+      <section id="comparisonAnalysisPage" class="hidden feature-page">
+        <div class="feature-page-header">
+          <button type="button" class="template-btn template-btn-secondary" data-feature-back>
+            <span class="material-symbols-outlined text-sm">arrow_back</span> 返回主页面
+          </button>
+          <div>
+            <h2>拆解数据对比分析</h2>
+            <p>导入 CSV、生成拆解结果，并完成同项目或跨项目的数据对比。</p>
+          </div>
+        </div>
 
       <!-- 文件导入 & 结果导出（左右布局） -->
       <section class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6 io-section">
@@ -656,6 +702,25 @@
           </div>
         </div>
       </section>
+      </section>
+
+      <!-- 拆解数据导出二级页面 -->
+      <section id="dataExportPage" class="hidden feature-page">
+        <div class="feature-page-header">
+          <button type="button" class="template-btn template-btn-secondary" data-feature-back>
+            <span class="material-symbols-outlined text-sm">arrow_back</span> 返回主页面
+          </button>
+          <div>
+            <h2>拆解数据导出</h2>
+            <p>独立的数据导出能力将在后续版本中完善。</p>
+          </div>
+        </div>
+        <div class="panel rounded-3xl p-8 feature-placeholder">
+          <div class="feature-placeholder-icon"><span class="material-symbols-outlined">file_export</span></div>
+          <h3>功能建设中</h3>
+          <p>后续将在这里提供独立的数据整理、格式选择和批量导出能力。</p>
+        </div>
+      </section>
     </main>
     </div>
 
@@ -665,9 +730,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026092906"></script>
-    <script src="./supabase-auth.js?v=2026092906"></script>
-    <script src="./app.js?v=2026092906"></script>
+    <script src="./config.js?v=2026092907"></script>
+    <script src="./supabase-auth.js?v=2026092907"></script>
+    <script src="./app.js?v=2026092907"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

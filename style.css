@@ -434,33 +434,114 @@ button:disabled:hover { filter: none; }
 }
 
 /* ============================================================
-   TEMPLATE BUILDER — entry + browser-side spreadsheet editor
+   FEATURE HOME + SECONDARY PAGES
    ============================================================ */
-body.template-builder-mode #appShell main > :not(#appTopBar):not(#templateBuilderPage) {
+body.feature-page-mode #appShell main > :not(#appTopBar):not(.feature-page) {
   display: none !important;
 }
 
-body.template-builder-mode #templateBuilderPage {
-  display: block !important;
+.feature-page {
+  padding-top: 0.5rem;
 }
 
-.template-builder-entry {
-  border-color: rgba(165, 180, 252, 0.8);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(238, 242, 255, 0.9));
+.feature-page-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.feature-page-header h2 {
+  color: #0f172a;
+  font-size: 1.45rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.feature-page-header p {
+  margin-top: 0.2rem;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.feature-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.feature-entry-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 132px;
+  padding: 1.35rem;
+  border: 1px solid rgba(199, 210, 254, 0.9);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 14px 38px rgba(79, 70, 229, 0.08);
+  text-align: left;
+  cursor: pointer;
   transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.template-builder-entry:hover {
-  transform: translateY(-2px);
+.feature-entry-card:hover {
+  transform: translateY(-3px);
   border-color: #818cf8;
-  box-shadow: 0 20px 45px rgba(79, 70, 229, 0.14);
+  box-shadow: 0 20px 46px rgba(79, 70, 229, 0.15);
 }
 
-.template-builder-entry-btn {
-  min-width: 118px;
+.feature-entry-icon {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  border-radius: 16px;
+  color: #4338ca;
+  background: #eef2ff;
 }
 
+.feature-entry-icon .material-symbols-outlined { font-size: 28px; }
+.feature-entry-content { display: grid; gap: 0.35rem; flex: 1; min-width: 0; }
+.feature-entry-content strong { color: #0f172a; font-size: 1.08rem; font-weight: 800; }
+.feature-entry-content small { color: #64748b; font-size: 0.78rem; line-height: 1.6; }
+.feature-entry-arrow { color: #94a3b8; transition: transform 0.2s ease, color 0.2s ease; }
+.feature-entry-card:hover .feature-entry-arrow { color: #4f46e5; transform: translateX(4px); }
+.feature-entry-blue .feature-entry-icon { color: #0369a1; background: #e0f2fe; }
+.feature-entry-emerald .feature-entry-icon { color: #047857; background: #d1fae5; }
+.feature-entry-amber .feature-entry-icon { color: #b45309; background: #fef3c7; }
+
+.feature-placeholder {
+  display: grid;
+  place-items: center;
+  min-height: 360px;
+  text-align: center;
+}
+.feature-placeholder-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  color: #b45309;
+  background: #fef3c7;
+}
+.feature-placeholder-icon .material-symbols-outlined { font-size: 38px; }
+.feature-placeholder h3 { margin-top: 1rem; color: #0f172a; font-size: 1.3rem; font-weight: 800; }
+.feature-placeholder p { margin-top: 0.45rem; color: #64748b; font-size: 0.9rem; }
+
+@media (max-width: 768px) {
+  .feature-entry-grid { grid-template-columns: 1fr; }
+  .feature-page-header { align-items: flex-start; flex-direction: column; }
+  .feature-entry-card { min-height: 116px; }
+}
+
+/* ============================================================
+   TEMPLATE BUILDER — browser-side spreadsheet editor
+   ============================================================ */
 .template-builder-page {
   padding-top: 0.5rem;
 }
