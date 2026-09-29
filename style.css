@@ -434,8 +434,37 @@ button:disabled:hover { filter: none; }
 }
 
 /* ============================================================
-   TEMPLATE BUILDER — browser-side spreadsheet editor
+   TEMPLATE BUILDER — entry + browser-side spreadsheet editor
    ============================================================ */
+body.template-builder-mode #appShell main > :not(#appTopBar):not(#templateBuilderPage) {
+  display: none !important;
+}
+
+body.template-builder-mode #templateBuilderPage {
+  display: block !important;
+}
+
+.template-builder-entry {
+  border-color: rgba(165, 180, 252, 0.8);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(238, 242, 255, 0.9));
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.template-builder-entry:hover {
+  transform: translateY(-2px);
+  border-color: #818cf8;
+  box-shadow: 0 20px 45px rgba(79, 70, 229, 0.14);
+}
+
+.template-builder-entry-btn {
+  min-width: 118px;
+  justify-content: center;
+}
+
+.template-builder-page {
+  padding-top: 0.5rem;
+}
+
 .template-builder-section {
   overflow: hidden;
 }
@@ -559,10 +588,12 @@ button:disabled:hover { filter: none; }
 }
 
 @media (max-width: 640px) {
+  .template-builder-entry-btn,
   .template-builder-actions,
   .template-builder-actions .template-btn {
     width: 100%;
   }
+  .template-builder-entry-btn,
   .template-builder-actions .template-btn {
     justify-content: center;
   }
