@@ -5894,6 +5894,203 @@ function bindEvents() {
       els.samplingChannelLocalFileName.title = file ? file.name : '';
     });
   }
+  // ---------- Feishu OAuth PKCE helpers ----------
+const FEISHU_OAUTH_STORAGE_KEY = 'feishu_oauth_export_pending_v1';
+
+function base64urlEncode(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let str = '';
+  for (let i = 0; i < bytes.length; i += 1) { str += String.fromCharCode(bytes[i]); }
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function feishuPkceChallenge(verifier) {
+  const encoder = new TextEncoder();
+  const hash = await crypto.subtle.digest('SHA-256', encoder.encode(verifier));
+  return base64urlEncode(hash);
+}
+
+function randomCodeVerifier() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return base64urlEncode(arr);
+}
+
+function feishuBuildAuthUrl(appId, redirectUri, codeChallenge, state) {
+  let url = 'https://open.feishu.cn/open-apis/authen/v1/authorize';
+  url += '?app_id=' + encodeURIComponent(appId);
+  url += '&redirect_uri=' + encodeURIComponent(redirectUri);
+  url += '&state=' + encodeURIComponent(state);
+  url += '&code_challenge=' + encodeURIComponent(codeChallenge);
+  url += '&code_challenge_method=S256';
+  return url;
+}
+
+async function feishuExchangeToken(appId, code, codeVerifier) {
+  const res = await fetch('https://open.feishu.cn/open-apis/authen/v1/oidc/access_token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ grant_type: 'authorization_code', code: code }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error('令牌交换失败 (' + res.status + ')：' + body);
+  }
+  return res.json();
+}
+
+async function feishuCreateSpreadsheet(accessToken, title) {
+  const res = await fetch('https://open.feishu.cn/open-apis/sheets/v3/spreadsheets', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Authorization: 'Bearer ' + accessToken,
+    },
+    body: JSON.stringify({ title: title }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error('创建电子表格失败 (' + res.status + ')：' + body);
+  }
+  const data = await res.json();
+  return data.data && data.data.spreadsheet ? data.data.spreadsheet : data.data;
+}
+
+async function feishuWriteValues(accessToken, spreadsheetToken, sheetId, rangeStart, values) {
+  const url = 'https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/' + spreadsheetToken + '/values';
+  const body = {
+    valueRange: {
+      range: sheetId + '!' + rangeStart,
+      values: values,
+    },
+  };
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Authorization: 'Bearer ' + accessToken,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const bodyText = await res.text();
+    throw new Error('写入数据失败 (' + res.status + ')：' + bodyText);
+  }
+  return res.json();
+}
+
+// OAuth callback handler — runs on page load to complete the export flow
+async function handleFeishuOAuthCallback() {
+  const qp = new URLSearchParams(window.location.search);
+  const code = qp.get('code');
+  const state = qp.get('state');
+  if (!code || !state) return;
+
+  // Clean URL immediately
+  const newUrl = window.location.origin + window.location.pathname + window.location.hash;
+  window.history.replaceState({}, '', newUrl);
+
+  try {
+    const storedRaw = sessionStorage.getItem(FEISHU_OAUTH_STORAGE_KEY + '_' + state);
+    if (!storedRaw) throw new Error('会话已过期，请重新导出。');
+    const stored = JSON.parse(storedRaw);
+    const { codeVerifier, docName, sheetName, rows, header } = stored;
+
+    // Exchange token
+    const tokenData = await feishuExchangeToken(window.POWER_ANALYSIS_CONFIG.feishuAppId, code, codeVerifier);
+    if (!tokenData || !tokenData.access_token) throw new Error('授权失败：未获取到访问令牌');
+
+    // Create spreadsheet
+    const sp = await feishuCreateSpreadsheet(tokenData.access_token, docName || '采样通道梳理-在线填写');
+    const ssToken = sp.spreadsheet_token || sp.spreadsheetToken;
+    if (!ssToken) throw new Error('创建电子表格失败：未返回表格标识');
+
+    // Write header + data
+    const allValues = [header, ...rows];
+    const sheetId = (sp.sheets && sp.sheets[0] && sp.sheets[0].sheet_id) || '0';
+    await feishuWriteValues(tokenData.access_token, ssToken, sheetId, 'A1', allValues);
+
+    // Rename sheet
+    if (sheetName && sp.sheets && sp.sheets[0]) {
+      try {
+        await fetch('https://open.feishu.cn/open-apis/sheets/v3/spreadsheets/' + ssToken + '/sheets/' + sheetId, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            Authorization: 'Bearer ' + tokenData.access_token,
+          },
+          body: JSON.stringify({ title: sheetName }),
+        });
+      } catch { /* rename is best-effort */ }
+    }
+
+    const sheetUrl = 'https://bytedance.larkoffice.com/sheets/' + ssToken;
+    alert('✅ 已成功导出到飞书云文档！\n\n🔗 ' + sheetUrl);
+
+    // Clear pending state
+    sessionStorage.removeItem(FEISHU_OAUTH_STORAGE_KEY + '_' + state);
+    // Also clear localStorage draft cache
+    try { localStorage.removeItem('sampling_channel_online_draft_v1'); } catch { /* ignore */ }
+  } catch (err) {
+    console.error('Feishu OAuth export error:', err);
+    // Fallback: load stored data and offer local download
+    try {
+      const storedRaw = sessionStorage.getItem(FEISHU_OAUTH_STORAGE_KEY + '_' + state);
+      if (storedRaw) {
+        const stored = JSON.parse(storedRaw);
+        const { rows, header } = stored;
+        fallbackFeishuExportToLocal(header, rows);
+        sessionStorage.removeItem(FEISHU_OAUTH_STORAGE_KEY + '_' + state);
+        return;
+      }
+    } catch { /* ignore */ }
+    alert('云文档导出失败：' + (err.message || '未知错误') + '\n\n数据已自动下载为本地 Excel，可手动上传到飞书。');
+  }
+}
+
+function fallbackFeishuExportToLocal(header, rows) {
+  const csvLines = [header.join(',')];
+  for (const row of rows) {
+    const vals = row.map((v) => {
+      const s = String(v || '');
+      if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    });
+    csvLines.push(vals.join(','));
+  }
+  const blob = new Blob(['\uFEFF' + csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'sampling-channel-online.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showFeishuUploadGuide();
+}
+
+function showFeishuUploadGuide() {
+  const overlay = document.createElement('div');
+  overlay.className = 'feishu-upload-guide-overlay';
+  overlay.innerHTML = '<div class="feishu-upload-guide-card">' +
+    '<div class="feishu-upload-guide-icon"><span class="material-symbols-outlined">cloud_upload</span></div>' +
+    '<h3>外部用户 · 手动上传指引</h3>' +
+    '<p>你的账号不在当前飞书企业内（或授权未完成），文件已自动下载为 <strong>Excel (CSV)</strong>。</p>' +
+    '<ol>' +
+      '<li>打开 <a href="https://bytedance.larkoffice.com/sheets/" target="_blank" rel="noopener">飞书电子表格</a></li>' +
+      '<li>点击「新建」→「从本地文件导入」</li>' +
+      '<li>选择已下载的 <code>sampling-channel-online.csv</code></li>' +
+      '<li>导入后即可在飞书中使用</li>' +
+    '</ol>' +
+    '<button type="button" class="template-btn template-btn-primary template-btn-sm feishu-guide-close-btn">知道了</button>' +
+  '</div>';
+  document.body.appendChild(overlay);
+  const closeBtn = overlay.querySelector('.feishu-guide-close-btn');
+  closeBtn.addEventListener('click', () => { document.body.removeChild(overlay); });
+  overlay.addEventListener('click', (event) => { if (event.target === overlay) document.body.removeChild(overlay); });
+}
+
   if (els.samplingChannelOnlineToggle && els.samplingChannelOnlineForm) {
     const defaultCsvDataKey = 'sampling_channel_online_draft_v1';
     const rulesStorageKey = 'sampling_channel_rules_v1';
@@ -6413,59 +6610,37 @@ function bindEvents() {
         alert('当前没有填写任何通道记录，请先添加行并填写数据。');
         return;
       }
-      const cloudUrl = window.POWER_ANALYSIS_CONFIG && window.POWER_ANALYSIS_CONFIG.cloudExportEndpoint;
-      if (!cloudUrl) {
-        alert('云文档导出接口未配置，请联系管理员。');
-        return;
-      }
-      // Check auth: must be logged in (not guest / standalone admin)
-      if (isGuestMode() || isStandaloneAdminMode()) {
-        alert('导出到云文档需要使用 Supabase 账号登录，当前处于游客/独立管理员模式。');
-        return;
-      }
+      const cfg = window.POWER_ANALYSIS_CONFIG;
+      const appId = cfg && cfg.feishuAppId;
+      const redirectUri = cfg && cfg.feishuOAuthRedirectUri;
+      if (!appId) { alert('飞书 App ID 未配置，请联系管理员。'); return; }
+      if (!redirectUri) { alert('OAuth 回调地址未配置，请联系管理员。'); return; }
+
       const cols = getSamplingChannelOnlineCols();
+      const header = cols.map((c) => c.label);
       const rows = state.samplingChannelOnlineRows.map((row) => {
         return cols.map((col) => (row[col.key] || ''));
       });
-      const header = cols.map((c) => c.label);
+
       // Ask user for naming
       const docName = window.prompt('请输入云文档名称（留空则使用默认名称）：', '采样通道梳理-在线填写');
-      if (docName === null) return; // user cancelled
+      if (docName === null) return;
       const sheetName = window.prompt('请输入 Sheet 名称（留空则使用默认名称）：', '采样通道梳理');
       if (sheetName === null) return;
-      (async () => {
-        try {
-          const client = await getSupabaseClient();
-          const { data: { session } } = await client.auth.getSession();
-          if (!session || !session.access_token) {
-            alert('登录状态已过期，请刷新页面重新登录。');
-            return;
-          }
-          const res = await fetch(cloudUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: 'Bearer ' + session.access_token,
-            },
-            body: JSON.stringify({
-              docName: docName || '采样通道梳理-在线填写',
-              sheetName: sheetName || '采样通道梳理',
-              header: header,
-              rows: rows,
-            }),
-          });
-          if (!res.ok) {
-            const body = await res.text();
-            throw new Error('云端导出失败（' + res.status + '）：' + (body || '未知错误'));
-          }
-          const result = await res.json();
-          alert('已成功导出到云文档！\n文档链接：' + (result.url || '请在飞书中查看'));
-          // Clear cache after successful download
-          clearSamplingChannelOnlineCache();
-        } catch (err) {
-          alert('云文档导出失败：' + (err.message || '网络错误，请稍后重试'));
-        }
-      })();
+
+      // Generate PKCE params
+      const codeVerifier = randomCodeVerifier();
+      const state = 'feishu_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8);
+
+      feishuPkceChallenge(codeVerifier).then((codeChallenge) => {
+        // Store data for callback
+        const pending = { codeVerifier, docName, sheetName, header, rows };
+        sessionStorage.setItem(FEISHU_OAUTH_STORAGE_KEY + '_' + state, JSON.stringify(pending));
+
+        // Redirect to Feishu OAuth
+        const authUrl = feishuBuildAuthUrl(appId, redirectUri, codeChallenge, state);
+        window.location.href = authUrl;
+      });
     }
 
     function toggleExportDropdown() {
@@ -6951,4 +7126,6 @@ window.addEventListener('power-auth-change', async (event) => {
   } catch (error) {
     console.warn('Supabase data bootstrap failed', error);
   }
+  // Handle Feishu OAuth callback (export cloud document)
+  handleFeishuOAuthCallback();
 });

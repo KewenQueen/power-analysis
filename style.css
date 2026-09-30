@@ -2510,3 +2510,37 @@ body.is-admin .admin-only-hidden { display: inline-flex !important; }
 }
 .export-dropdown-menu li:hover { background: #f0f4ff; color: #1d4ed8; }
 .export-dropdown-menu li .material-symbols-outlined { font-size: 1rem; color: #6366f1; }
+
+/* ===== Feishu upload guide overlay ===== */
+.feishu-upload-guide-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.4);
+}
+.feishu-upload-guide-card {
+  width: 90%; max-width: 440px;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: 0 12px 36px rgba(0,0,0,.18);
+  padding: 1.2rem 1.3rem;
+  text-align: center;
+}
+.feishu-upload-guide-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 56px; height: 56px; margin: 0 auto .6rem;
+  border-radius: 50%; background: #eff6ff; color: #3b82f6;
+}
+.feishu-upload-guide-icon .material-symbols-outlined { font-size: 1.8rem; }
+.feishu-upload-guide-card h3 { color: #1e293b; font-size: .88rem; font-weight: 800; margin-bottom: .35rem; }
+.feishu-upload-guide-card p { color: #475569; font-size: .72rem; line-height: 1.55; margin-bottom: .65rem; }
+.feishu-upload-guide-card ol {
+  text-align: left; padding-left: 1.2rem;
+  color: #475569; font-size: .7rem; line-height: 1.6; margin-bottom: .8rem;
+}
+.feishu-upload-guide-card ol li { margin-bottom: .2rem; }
+.feishu-upload-guide-card a { color: #2563eb; text-decoration: underline; }
+.feishu-upload-guide-card code {
+  background: #f1f5f9; color: #334155;
+  padding: .08rem .35rem; border-radius: .25rem; font-size: .65rem;
+}
+.feishu-guide-close-btn { margin-top: .3rem; }
