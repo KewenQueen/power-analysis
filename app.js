@@ -455,6 +455,9 @@ const state = {
     directoryHandle: null,
   },
 
+  // Sampling channel online form data
+  samplingChannelOnlineRows: [],
+
   // Compare groups (in-memory). Each group is an independent comparison table.
   // { id, name, snapshots: [], highlightDiff: false }
   compareGroups: [{ id: 'grp_init', name: '对比组 1', snapshots: [], highlightDiff: false }],
@@ -517,6 +520,13 @@ const els = {
   samplingChannelLocalFileName: document.getElementById('samplingChannelLocalFileName'),
   samplingChannelOnlineToggle: document.getElementById('samplingChannelOnlineToggle'),
   samplingChannelOnlineForm: document.getElementById('samplingChannelOnlineForm'),
+  samplingChannelOnlineAddRow: document.getElementById('samplingChannelOnlineAddRow'),
+  samplingChannelOnlineExportCSV: document.getElementById('samplingChannelOnlineExportCSV'),
+  samplingChannelOnlineClear: document.getElementById('samplingChannelOnlineClear'),
+  samplingChannelOnlineBody: document.getElementById('samplingChannelOnlineBody'),
+  samplingChannelOnlineEmpty: document.getElementById('samplingChannelOnlineEmpty'),
+  samplingChannelOnlineRowCount: document.getElementById('samplingChannelOnlineRowCount'),
+  samplingChannelOnlineTableWrap: document.getElementById('samplingChannelOnlineTableWrap'),
   templateBuilderProjectName: document.getElementById('templateBuilderProjectName'),
   templateBuilderStatus: document.getElementById('templateBuilderStatus'),
   templateBuilderHead: document.getElementById('templateBuilderHead'),
@@ -5885,6 +5895,202 @@ function bindEvents() {
     });
   }
   if (els.samplingChannelOnlineToggle && els.samplingChannelOnlineForm) {
+    const defaultCsvDataKey = 'sampling_channel_online_draft_v1';
+
+    function getSamplingChannelOnlineCols() {
+      return [
+        { key: 'module', label: '模块' },
+        { key: 'sub_module', label: '子模块' },
+        { key: 'tiny_module', label: 'tiny模块' },
+        { key: 'power_domain', label: 'power domain' },
+        { key: 'priority', label: '优先级' },
+        { key: 'net', label: 'NET' },
+        { key: 'net_plus', label: '采样通道 NET+' },
+        { key: 'net_minus', label: '采样通道 NET-' },
+        { key: 'resistor', label: '采样电阻' },
+        { key: 'resistor_ref', label: '电阻位号' },
+        { key: 'qc_channel', label: '采样通道QC' },
+        { key: 'dcdc_l1', label: '输入电源-1级_DCDC' },
+        { key: 'ldo_l2', label: '输入电源-2级_LDO' },
+        { key: 'remark', label: '备注' },
+        { key: 'schematic_check', label: '原理图CHECK' },
+      ];
+    }
+
+    function loadSamplingChannelOnlineDraft() {
+      try {
+        const raw = localStorage.getItem(defaultCsvDataKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) state.samplingChannelOnlineRows = parsed;
+        }
+      } catch {
+        state.samplingChannelOnlineRows = [];
+      }
+    }
+
+    function saveSamplingChannelOnlineDraft() {
+      try {
+        localStorage.setItem(defaultCsvDataKey, JSON.stringify(state.samplingChannelOnlineRows));
+      } catch { /* quota exceeded — silently fail */ }
+    }
+
+    function renderSamplingChannelOnlineEmpty() {
+      if (!els.samplingChannelOnlineEmpty) return;
+      const hasRows = state.samplingChannelOnlineRows.length > 0;
+      els.samplingChannelOnlineEmpty.classList.toggle('hidden', hasRows);
+      if (!hasRows && els.samplingChannelOnlineTableWrap) {
+        els.samplingChannelOnlineTableWrap.style.maxHeight = '';
+      }
+    }
+
+    function updateSamplingChannelOnlineRowCount() {
+      if (els.samplingChannelOnlineRowCount) {
+        els.samplingChannelOnlineRowCount.textContent = String(state.samplingChannelOnlineRows.length);
+      }
+    }
+
+    function renderSamplingChannelOnlineRow(rowIndex) {
+      if (!els.samplingChannelOnlineBody) return;
+      const cols = getSamplingChannelOnlineCols();
+      const row = state.samplingChannelOnlineRows[rowIndex];
+      if (!row) return;
+
+      const tr = document.createElement('tr');
+      tr.setAttribute('data-sc-row', String(rowIndex));
+
+      // Row number
+      const tdIdx = document.createElement('td');
+      tdIdx.textContent = String(rowIndex + 1);
+      tr.appendChild(tdIdx);
+
+      // Data cells
+      for (const col of cols) {
+        const td = document.createElement('td');
+        if (col.key === 'priority') {
+          const select = document.createElement('select');
+          const options = ['', '必须', '必须(QC)', '合并', '可选', '不测'];
+          for (const opt of options) {
+            const optionEl = document.createElement('option');
+            optionEl.value = opt;
+            optionEl.textContent = opt || '—';
+            if ((row[col.key] || '') === opt) optionEl.selected = true;
+            select.appendChild(optionEl);
+          }
+          select.addEventListener('change', () => {
+            row[col.key] = select.value;
+            saveSamplingChannelOnlineDraft();
+          });
+          td.appendChild(select);
+        } else {
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.value = row[col.key] || '';
+          input.addEventListener('input', (event) => {
+            row[col.key] = event.target.value;
+            saveSamplingChannelOnlineDraft();
+          });
+          td.appendChild(input);
+        }
+        tr.appendChild(td);
+      }
+
+      // Delete button
+      const tdDel = document.createElement('td');
+      tdDel.className = 'sc-delete-cell';
+      const btnDel = document.createElement('button');
+      btnDel.type = 'button';
+      btnDel.className = 'sc-delete-btn';
+      btnDel.innerHTML = '<span class="material-symbols-outlined" style="font-size:1rem">delete</span>';
+      btnDel.title = '删除此行';
+      btnDel.addEventListener('click', () => {
+        deleteSamplingChannelOnlineRow(rowIndex);
+      });
+      tdDel.appendChild(btnDel);
+      tr.appendChild(tdDel);
+
+      els.samplingChannelOnlineBody.appendChild(tr);
+    }
+
+    function renderAllSamplingChannelOnlineRows() {
+      if (!els.samplingChannelOnlineBody) return;
+      els.samplingChannelOnlineBody.innerHTML = '';
+      for (let i = 0; i < state.samplingChannelOnlineRows.length; i += 1) {
+        renderSamplingChannelOnlineRow(i);
+      }
+      renderSamplingChannelOnlineEmpty();
+      updateSamplingChannelOnlineRowCount();
+    }
+
+    function addSamplingChannelOnlineRow() {
+      const newRow = {};
+      const cols = getSamplingChannelOnlineCols();
+      for (const col of cols) {
+        newRow[col.key] = '';
+      }
+      state.samplingChannelOnlineRows.push(newRow);
+      saveSamplingChannelOnlineDraft();
+
+      // Append just the new row to avoid full re-render
+      if (els.samplingChannelOnlineBody && state.samplingChannelOnlineRows.length - 1 >= 0) {
+        renderSamplingChannelOnlineRow(state.samplingChannelOnlineRows.length - 1);
+        renderSamplingChannelOnlineEmpty();
+        updateSamplingChannelOnlineRowCount();
+        // Scroll to bottom
+        if (els.samplingChannelOnlineTableWrap) {
+          els.samplingChannelOnlineTableWrap.scrollTop = els.samplingChannelOnlineTableWrap.scrollHeight;
+        }
+      }
+    }
+
+    function deleteSamplingChannelOnlineRow(rowIndex) {
+      if (rowIndex < 0 || rowIndex >= state.samplingChannelOnlineRows.length) return;
+      state.samplingChannelOnlineRows.splice(rowIndex, 1);
+      saveSamplingChannelOnlineDraft();
+      renderAllSamplingChannelOnlineRows();
+    }
+
+    function clearSamplingChannelOnlineRows() {
+      if (state.samplingChannelOnlineRows.length === 0) return;
+      if (!window.confirm('确定要清空所有已填写的通道记录吗？此操作不可撤销。')) return;
+      state.samplingChannelOnlineRows = [];
+      saveSamplingChannelOnlineDraft();
+      renderAllSamplingChannelOnlineRows();
+    }
+
+    function exportSamplingChannelOnlineCSV() {
+      if (state.samplingChannelOnlineRows.length === 0) {
+        alert('当前没有填写任何通道记录，请先添加行并填写数据。');
+        return;
+      }
+      const cols = getSamplingChannelOnlineCols();
+      const header = cols.map((c) => c.label).join(',');
+      const csvLines = [header];
+      for (const row of state.samplingChannelOnlineRows) {
+        const values = cols.map((col) => {
+          const v = (row[col.key] || '');
+          // Escape CSV: wrap in quotes if contains comma, newline, or quote
+          if (/[",\n\r]/.test(v)) return '"' + v.replace(/"/g, '""') + '"';
+          return v;
+        });
+        csvLines.push(values.join(','));
+      }
+      const blob = new Blob(['\uFEFF' + csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'sampling-channel-online.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // Load saved draft
+    loadSamplingChannelOnlineDraft();
+    renderAllSamplingChannelOnlineRows();
+
+    // Toggle logic
     els.samplingChannelOnlineToggle.addEventListener('click', () => {
       const willOpen = els.samplingChannelOnlineForm.classList.contains('hidden');
       els.samplingChannelOnlineForm.classList.toggle('hidden', !willOpen);
@@ -5892,8 +6098,16 @@ function bindEvents() {
       els.samplingChannelOnlineToggle.setAttribute('aria-expanded', String(willOpen));
       const label = els.samplingChannelOnlineToggle.querySelector('.sampling-channel-online-action > span:first-child');
       if (label) label.textContent = willOpen ? '收起填写模板' : '展开填写模板';
-      if (willOpen) els.samplingChannelOnlineForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (willOpen) {
+        renderAllSamplingChannelOnlineRows();
+        els.samplingChannelOnlineForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     });
+
+    // Button handlers
+    if (els.samplingChannelOnlineAddRow) els.samplingChannelOnlineAddRow.addEventListener('click', addSamplingChannelOnlineRow);
+    if (els.samplingChannelOnlineClear) els.samplingChannelOnlineClear.addEventListener('click', clearSamplingChannelOnlineRows);
+    if (els.samplingChannelOnlineExportCSV) els.samplingChannelOnlineExportCSV.addEventListener('click', exportSamplingChannelOnlineCSV);
   }
   if (els.templateBuilderProjectName) {
     els.templateBuilderProjectName.addEventListener('input', (event) => {

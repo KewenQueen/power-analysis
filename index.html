@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026100118" />
+    <link rel="stylesheet" href="./style.css?v=2026100119" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -368,13 +368,111 @@
               </button>
             </div>
             <div id="samplingChannelOnlineForm" class="sampling-channel-online-form hidden">
+              <!-- 填写规则展示区域 -->
+              <details id="samplingChannelRulesDisclosure" class="sampling-channel-rules">
+                <summary class="sampling-channel-rules-summary">
+                  <span class="material-symbols-outlined">info</span>
+                  <strong>查看填写规则</strong>
+                  <span class="material-symbols-outlined sampling-channel-rules-chevron">expand_more</span>
+                </summary>
+                <div class="sampling-channel-rules-body">
+                  <div class="rules-grid">
+                    <div class="rules-block">
+                      <h4><span class="material-symbols-outlined">architecture</span>通道设计原则</h4>
+                      <ul>
+                        <li>通道兼容 NI 和 QC 采集设备；目标按 2 组 + 1 采集卡设计：NI（2×40+10=90ch），QC（48×2=96ch）</li>
+                        <li>QC 相比 NI 采样通道更多，部分电源效率的采集通道仅配置在 QC 采集通道上</li>
+                        <li>受布板面积及走线限制，部分电源网络无法采集，根据实际走线调整布局</li>
+                      </ul>
+                    </div>
+                    <div class="rules-block">
+                      <h4><span class="material-symbols-outlined">priority_high</span>优先级说明</h4>
+                      <ul>
+                        <li><strong>必须</strong> — 关键器件的核心电源域，为必须采集项</li>
+                        <li><strong>必须(QC)</strong> — 部分电源效率的电流采集通道，仅 QC 采集</li>
+                        <li><strong>合并</strong> — 共同电源域的小电流采集通道，多路合并测量</li>
+                        <li><strong>可选</strong> — 电流小且稳定的通道，通道冗余时可增加</li>
+                        <li><strong>不测</strong> — 电流极小无需采集（如上拉电源 / GPIO 参考电源 / 有其他手段测量的通道）</li>
+                      </ul>
+                    </div>
+                    <div class="rules-block">
+                      <h4><span class="material-symbols-outlined">edit</span>NET 命名规则</h4>
+                      <ul>
+                        <li>NET+ 电源名字不变，串接电阻后 NET- 更名 <code>NET_L_powerdomain</code></li>
+                        <li>SOC 电源：NET+ 更名 <code>NET_S_powerdomain</code>，串接电阻后 NET- 电源名字不变</li>
+                        <li>三明治结构 RF 板上的采样网络需和主板电源网络做命名区分（串 0Ω 电阻更改网络命名）</li>
+                      </ul>
+                    </div>
+                    <div class="rules-block">
+                      <h4><span class="material-symbols-outlined">straighten</span>采样电阻选取规则</h4>
+                      <div class="rules-resistor-table-wrap">
+                        <table class="rules-resistor-table">
+                          <thead>
+                            <tr><th>电流范围</th><th>推荐阻值</th><th>精度</th><th>压降要求</th></tr>
+                          </thead>
+                          <tbody>
+                            <tr><td>&gt;1000mA</td><td>10mΩ</td><td>&lt;1%</td><td>&lt;20mV</td></tr>
+                            <tr><td>500mA ~ 1000mA</td><td>20mΩ</td><td>&lt;1%</td><td>&lt;20mV</td></tr>
+                            <tr><td>200mA ~ 500mA</td><td>50mΩ</td><td>&lt;1%</td><td>&lt;20mV</td></tr>
+                            <tr><td>100mA ~ 200mA</td><td>100mΩ</td><td>&lt;1%</td><td>&lt;20mV</td></tr>
+                            <tr><td>50mA ~ 100mA</td><td>200mΩ</td><td>&lt;1%</td><td>&lt;20mV</td></tr>
+                            <tr><td>10mA ~ 50mA</td><td>500mΩ</td><td>&lt;1%</td><td>&lt;20mV</td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </details>
+
+              <!-- 在线填写表格 -->
               <div class="sampling-channel-online-form-heading">
-                <div><strong>采样通道在线填写模板</strong><small>标准字段模板稍后补充，当前先展示结构占位。</small></div>
-                <span class="sampling-channel-badge">模板待上传</span>
+                <div>
+                  <strong>采样通道在线填写模板</strong>
+                  <small>按实际项目逐行填写，字段与「采样通道梳理」标准模板一致。当前 <span id="samplingChannelOnlineRowCount">0</span> 行。</small>
+                </div>
+                <div class="sampling-channel-online-actions">
+                  <button id="samplingChannelOnlineAddRow" type="button" class="template-btn template-btn-primary template-btn-sm" title="新增一行">
+                    <span class="material-symbols-outlined text-sm">add_row</span>新增行
+                  </button>
+                  <button id="samplingChannelOnlineExportCSV" type="button" class="template-btn template-btn-secondary template-btn-sm" title="导出为 CSV">
+                    <span class="material-symbols-outlined text-sm">download</span>导出 CSV
+                  </button>
+                  <button id="samplingChannelOnlineClear" type="button" class="template-btn template-btn-danger template-btn-sm" title="清空全部行">
+                    <span class="material-symbols-outlined text-sm">delete</span>清空
+                  </button>
+                </div>
               </div>
-              <div class="sampling-channel-form-placeholder">
-                <span class="material-symbols-outlined">table_rows</span>
-                <div><strong>填写区域占位</strong><small>后续将在此提供采样通道名称、类型、映射关系等标准字段。</small></div>
+
+              <div id="samplingChannelOnlineTableWrap" class="template-builder-table-wrap sampling-channel-online-table-wrap">
+                <table id="samplingChannelOnlineTable" class="template-builder-table sampling-channel-online-table">
+                  <thead>
+                    <tr>
+                      <th class="sc-th-index">#</th>
+                      <th class="sc-th-module">模块</th>
+                      <th class="sc-th-sub">子模块</th>
+                      <th class="sc-th-tiny">tiny模块</th>
+                      <th class="sc-th-pd">power domain</th>
+                      <th class="sc-th-prio">优先级</th>
+                      <th class="sc-th-net">NET</th>
+                      <th class="sc-th-netp">采样通道 NET+</th>
+                      <th class="sc-th-netn">采样通道 NET-</th>
+                      <th class="sc-th-res">采样电阻</th>
+                      <th class="sc-th-rid">电阻位号</th>
+                      <th class="sc-th-qc">采样通道QC</th>
+                      <th class="sc-th-dcdc">输入电源-1级_DCDC</th>
+                      <th class="sc-th-ldo">输入电源-2级_LDO</th>
+                      <th class="sc-th-note">备注</th>
+                      <th class="sc-th-check">原理图CHECK</th>
+                      <th class="sc-th-del"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="samplingChannelOnlineBody"></tbody>
+                </table>
+                <div id="samplingChannelOnlineEmpty" class="sampling-channel-online-empty">
+                  <span class="material-symbols-outlined">table_rows</span>
+                  <p>暂未添加通道记录，点击「新增行」开始填写。</p>
+                </div>
               </div>
             </div>
           </section>
@@ -846,9 +944,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026100118"></script>
-    <script src="./supabase-auth.js?v=2026100118"></script>
-    <script src="./app.js?v=2026100118"></script>
+    <script src="./config.js?v=2026100119"></script>
+    <script src="./supabase-auth.js?v=2026100119"></script>
+    <script src="./app.js?v=2026100119"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
