@@ -6378,13 +6378,22 @@ function bindEvents() {
       try { localStorage.removeItem(defaultCsvDataKey); } catch { /* ignore */ }
     }
 
-    function exportSamplingChannelOnlineExcel() {
+    async function exportSamplingChannelOnlineExcel() {
       if (state.samplingChannelOnlineRows.length === 0) {
         alert('当前没有填写任何通道记录，请先添加行并填写数据。');
         return;
       }
+
+      // Default filename with today's date
+      const today = new Date();
+      const ds = today.getFullYear() + '-' +
+        String(today.getMonth() + 1).padStart(2, '0') + '-' +
+        String(today.getDate()).padStart(2, '0');
+      const defaultName = '采样通道梳理_' + ds + '.csv';
+      const fileName = window.prompt('请输入导出文件名称：', defaultName);
+      if (fileName === null) return; // user cancelled
+
       const cols = getSamplingChannelOnlineCols();
-      // Build simple XLSX-like CSV with BOM (widely compatible with Excel)
       const header = cols.map((c) => c.label).join(',');
       const csvLines = [header];
       for (const row of state.samplingChannelOnlineRows) {
@@ -6395,11 +6404,36 @@ function bindEvents() {
         });
         csvLines.push(values.join(','));
       }
+      const safeName = fileName.endsWith('.csv') ? fileName : fileName + '.csv';
       const blob = new Blob(['\uFEFF' + csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+
+      // Try File System Access API for custom save path
+      if (typeof window.showSaveFilePicker === 'function') {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: safeName,
+            types: [{
+              description: 'CSV 文件',
+              accept: { 'text/csv': ['.csv'] },
+            }],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          // Clear cache after successful download
+          clearSamplingChannelOnlineCache();
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return; // user cancelled
+          // Fall through to fallback
+        }
+      }
+
+      // Fallback: traditional download
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'sampling-channel-online.csv';
+      a.download = safeName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
