@@ -6004,12 +6004,14 @@ function bindEvents() {
           titleWrap.appendChild(iconSpan);
           titleWrap.appendChild(titleInput);
           block.appendChild(titleWrap);
-          // Content textarea
-          const textarea = document.createElement('textarea');
-          textarea.className = 'rules-edit-textarea';
-          textarea.value = rule.content;
-          textarea.setAttribute('data-rule-field', 'content');
-          block.appendChild(textarea);
+          // Content: WYSIWYG contenteditable div that renders HTML in-place
+          const ceDiv = document.createElement('div');
+          ceDiv.className = 'rules-edit-contenteditable';
+          ceDiv.setAttribute('contenteditable', 'true');
+          ceDiv.setAttribute('data-rule-field', 'content');
+          ceDiv.innerHTML = rule.content;
+          // Focus hint styles are in CSS
+          block.appendChild(ceDiv);
         } else {
           // View mode
           const h4 = document.createElement('h4');
@@ -6049,13 +6051,13 @@ function bindEvents() {
       blocks.forEach((block) => {
         const id = block.getAttribute('data-rule-id');
         const titleInput = block.querySelector('[data-rule-field="title"]');
-        const contentTextarea = block.querySelector('[data-rule-field="content"]');
+        const contentEl = block.querySelector('[data-rule-field="content"]');
         const orig = rules.find((r) => r.id === id) || {};
         newRules.push({
           id: id,
           title: titleInput ? titleInput.value : orig.title,
           icon: orig.icon || 'info',
-          content: contentTextarea ? contentTextarea.value : orig.content,
+          content: contentEl ? contentEl.innerHTML : orig.content,
         });
       });
       saveCustomRules(newRules);
@@ -6285,8 +6287,35 @@ function bindEvents() {
       els.samplingChannelOnlineBody.appendChild(tr);
     }
 
+    function renderTableHeader() {
+      const thead = document.getElementById('samplingChannelOnlineHead');
+      const table = document.getElementById('samplingChannelOnlineTable');
+      if (!thead || !table) return;
+      const cols = getSamplingChannelOnlineCols();
+      thead.innerHTML = '';
+      const tr = document.createElement('tr');
+      // Row number header
+      const thIdx = document.createElement('th');
+      thIdx.textContent = '#';
+      thIdx.style.cssText = 'width:38px;min-width:38px;text-align:center';
+      tr.appendChild(thIdx);
+      // Column headers
+      cols.forEach((col) => {
+        const th = document.createElement('th');
+        th.textContent = col.label;
+        th.style.minWidth = '84px';
+        tr.appendChild(th);
+      });
+      // Delete column header
+      const thDel = document.createElement('th');
+      thDel.style.cssText = 'width:40px;min-width:40px';
+      tr.appendChild(thDel);
+      thead.appendChild(tr);
+    }
+
     function renderAllSamplingChannelOnlineRows() {
       if (!els.samplingChannelOnlineBody) return;
+      renderTableHeader();
       els.samplingChannelOnlineBody.innerHTML = '';
       for (let i = 0; i < state.samplingChannelOnlineRows.length; i += 1) {
         renderSamplingChannelOnlineRow(i);

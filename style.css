@@ -2356,6 +2356,20 @@ body.is-admin .admin-only-hidden { display: inline-flex !important; }
   background: #fff;
 }
 .rules-block textarea.rules-edit-textarea:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
+.rules-block .rules-edit-contenteditable {
+  min-height: 110px;
+  padding: .5rem .55rem;
+  border: 1px solid #cbd5e1;
+  border-radius: .5rem;
+  font-size: .67rem;
+  line-height: 1.6;
+  color: #0f172a;
+  background: #fff;
+  outline: none;
+  cursor: text;
+  transition: border-color .15s, box-shadow .15s;
+}
+.rules-block .rules-edit-contenteditable:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
 .rules-block-title-input {
   display: flex;
   align-items: center;
