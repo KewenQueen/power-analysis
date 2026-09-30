@@ -2276,3 +2276,38 @@ body.col-resizing {
 }
 .sampling-channel-online-empty .material-symbols-outlined { font-size: 1.4rem; color: #bae6fd; }
 .sampling-channel-online-empty p { font-size: .72rem; margin: 0; }
+
+/* ===== 拆解模板自动生成 ===== */
+.auto-gen-section { background: linear-gradient(135deg, #fffaf0, #fff7ed); border-color: #fdcb6e; }
+.auto-gen-placeholder {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  margin-top: .65rem;
+  padding: .85rem 1rem;
+  border: 1px dashed #f0c75e;
+  border-radius: .85rem;
+  background: #fffdf7;
+}
+.auto-gen-placeholder-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: .75rem;
+  background: #fef3c7;
+  color: #d97706;
+}
+.auto-gen-placeholder-icon .material-symbols-outlined { font-size: 1.5rem; }
+.auto-gen-placeholder-body { flex: 1; min-width: 0; }
+.auto-gen-placeholder-body strong, .auto-gen-placeholder-body small { display: block; }
+.auto-gen-placeholder-body strong { color: #78350f; font-size: .76rem; font-weight: 800; }
+.auto-gen-placeholder-body small {
+  margin-top: .25rem;
+  color: #78716c;
+  font-size: .67rem;
+  line-height: 1.5;
+}
+.auto-gen-badge { background: #fef3c7; color: #92400e; }
