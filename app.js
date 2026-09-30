@@ -5896,26 +5896,299 @@ function bindEvents() {
   }
   if (els.samplingChannelOnlineToggle && els.samplingChannelOnlineForm) {
     const defaultCsvDataKey = 'sampling_channel_online_draft_v1';
+    const rulesStorageKey = 'sampling_channel_rules_v1';
+    const columnsStorageKey = 'sampling_channel_columns_v1';
+
+    // ---------- Default rules (static — used when no custom overrides) ----------
+    const DEFAULT_RULES = [
+      {
+        id: 'design_principles', title: '通道设计原则', icon: 'architecture',
+        content: '<ul><li>通道兼容 NI 和 QC 采集设备；目标按 2 组 + 1 采集卡设计：NI（2×40+10=90ch），QC（48×2=96ch）</li><li>QC 相比 NI 采样通道更多，部分电源效率的采集通道仅配置在 QC 采集通道上</li><li>受布板面积及走线限制，部分电源网络无法采集，根据实际走线调整布局</li></ul>',
+      },
+      {
+        id: 'priority_guide', title: '优先级说明', icon: 'priority_high',
+        content: '<ul><li><strong>必须</strong> — 关键器件的核心电源域，为必须采集项</li><li><strong>必须(QC)</strong> — 部分电源效率的电流采集通道，仅 QC 采集</li><li><strong>合并</strong> — 共同电源域的小电流采集通道，多路合并测量</li><li><strong>可选</strong> — 电流小且稳定的通道，通道冗余时可增加</li><li><strong>不测</strong> — 电流极小无需采集（如上拉电源 / GPIO 参考电源 / 有其他手段测量的通道）</li></ul>',
+      },
+      {
+        id: 'net_naming', title: 'NET 命名规则', icon: 'edit',
+        content: '<ul><li>NET+ 电源名字不变，串接电阻后 NET- 更名 <code>NET_L_powerdomain</code></li><li>SOC 电源：NET+ 更名 <code>NET_S_powerdomain</code>，串接电阻后 NET- 电源名字不变</li><li>三明治结构 RF 板上的采样网络需和主板电源网络做命名区分（串 0Ω 电阻更改网络命名）</li></ul>',
+      },
+      {
+        id: 'resistor_selection', title: '采样电阻选取规则', icon: 'straighten',
+        content: '<div class="rules-resistor-table-wrap"><table class="rules-resistor-table"><thead><tr><th>电流范围</th><th>推荐阻值</th><th>精度</th><th>压降要求</th></tr></thead><tbody><tr><td>&gt;1000mA</td><td>10mΩ</td><td>&lt;1%</td><td>&lt;20mV</td></tr><tr><td>500mA ~ 1000mA</td><td>20mΩ</td><td>&lt;1%</td><td>&lt;20mV</td></tr><tr><td>200mA ~ 500mA</td><td>50mΩ</td><td>&lt;1%</td><td>&lt;20mV</td></tr><tr><td>100mA ~ 200mA</td><td>100mΩ</td><td>&lt;1%</td><td>&lt;20mV</td></tr><tr><td>50mA ~ 100mA</td><td>200mΩ</td><td>&lt;1%</td><td>&lt;20mV</td></tr><tr><td>10mA ~ 50mA</td><td>500mΩ</td><td>&lt;1%</td><td>&lt;20mV</td></tr></tbody></table></div>',
+      },
+    ];
+
+    // ---------- Default columns ----------
+    const DEFAULT_COLUMNS = [
+      { key: 'module', label: '模块' },
+      { key: 'sub_module', label: '子模块' },
+      { key: 'tiny_module', label: 'tiny模块' },
+      { key: 'power_domain', label: 'power domain' },
+      { key: 'priority', label: '优先级' },
+      { key: 'net', label: 'NET' },
+      { key: 'net_plus', label: '采样通道 NET+' },
+      { key: 'net_minus', label: '采样通道 NET-' },
+      { key: 'resistor', label: '采样电阻' },
+      { key: 'resistor_ref', label: '电阻位号' },
+      { key: 'qc_channel', label: '采样通道QC' },
+      { key: 'dcdc_l1', label: '输入电源-1级_DCDC' },
+      { key: 'ldo_l2', label: '输入电源-2级_LDO' },
+      { key: 'remark', label: '备注' },
+      { key: 'schematic_check', label: '原理图CHECK' },
+    ];
+
+    // ---------- Custom rules / columns state ----------
+    let customRules = null;    // null = not loaded; array once loaded (may be empty if using defaults)
+    let customColumns = null;
+    let rulesEditing = false;
+
+    function loadCustomRules() {
+      try {
+        const raw = localStorage.getItem(rulesStorageKey);
+        if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) customRules = arr; else customRules = []; }
+        else customRules = [];
+      } catch { customRules = []; }
+    }
+
+    function saveCustomRules(rules) {
+      try { localStorage.setItem(rulesStorageKey, JSON.stringify(rules)); } catch { /* ignore */ }
+      customRules = rules;
+    }
+
+    function loadCustomColumns() {
+      try {
+        const raw = localStorage.getItem(columnsStorageKey);
+        if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) customColumns = arr; else customColumns = []; }
+        else customColumns = [];
+      } catch { customColumns = []; }
+    }
+
+    function saveCustomColumns(cols) {
+      try { localStorage.setItem(columnsStorageKey, JSON.stringify(cols)); } catch { /* ignore */ }
+      customColumns = cols;
+    }
+
+    function getActiveRules() {
+      if (customRules === null) loadCustomRules();
+      return (customRules && customRules.length > 0) ? customRules : DEFAULT_RULES;
+    }
 
     function getSamplingChannelOnlineCols() {
-      return [
-        { key: 'module', label: '模块' },
-        { key: 'sub_module', label: '子模块' },
-        { key: 'tiny_module', label: 'tiny模块' },
-        { key: 'power_domain', label: 'power domain' },
-        { key: 'priority', label: '优先级' },
-        { key: 'net', label: 'NET' },
-        { key: 'net_plus', label: '采样通道 NET+' },
-        { key: 'net_minus', label: '采样通道 NET-' },
-        { key: 'resistor', label: '采样电阻' },
-        { key: 'resistor_ref', label: '电阻位号' },
-        { key: 'qc_channel', label: '采样通道QC' },
-        { key: 'dcdc_l1', label: '输入电源-1级_DCDC' },
-        { key: 'ldo_l2', label: '输入电源-2级_LDO' },
-        { key: 'remark', label: '备注' },
-        { key: 'schematic_check', label: '原理图CHECK' },
-      ];
+      if (customColumns === null) loadCustomColumns();
+      return (customColumns && customColumns.length > 0) ? customColumns : DEFAULT_COLUMNS;
     }
+
+    // ---------- Rules rendering ----------
+    function renderRulesGrid() {
+      const grid = document.getElementById('samplingChannelRulesGrid');
+      if (!grid) return;
+      const rules = getActiveRules();
+      grid.innerHTML = '';
+      rules.forEach((rule) => {
+        const block = document.createElement('div');
+        block.className = 'rules-block';
+        block.setAttribute('data-rule-id', rule.id);
+        if (rulesEditing) {
+          // Title input
+          const titleWrap = document.createElement('div');
+          titleWrap.className = 'rules-block-title-input';
+          const iconSpan = document.createElement('span');
+          iconSpan.className = 'material-symbols-outlined';
+          iconSpan.style.cssText = 'color:#0ea5e9;font-size:1rem';
+          iconSpan.textContent = rule.icon;
+          const titleInput = document.createElement('input');
+          titleInput.type = 'text';
+          titleInput.value = rule.title;
+          titleInput.setAttribute('data-rule-field', 'title');
+          titleWrap.appendChild(iconSpan);
+          titleWrap.appendChild(titleInput);
+          block.appendChild(titleWrap);
+          // Content textarea
+          const textarea = document.createElement('textarea');
+          textarea.className = 'rules-edit-textarea';
+          textarea.value = rule.content;
+          textarea.setAttribute('data-rule-field', 'content');
+          block.appendChild(textarea);
+        } else {
+          // View mode
+          const h4 = document.createElement('h4');
+          h4.innerHTML = '<span class="material-symbols-outlined">' + rule.icon + '</span>' + rule.title;
+          block.appendChild(h4);
+          const contentDiv = document.createElement('div');
+          contentDiv.className = 'rules-content';
+          contentDiv.innerHTML = rule.content;
+          block.appendChild(contentDiv);
+        }
+        grid.appendChild(block);
+      });
+    }
+
+    function enterRulesEditMode() {
+      if (rulesEditing) return;
+      rulesEditing = true;
+      renderRulesGrid();
+      const editBar = document.getElementById('samplingChannelRulesEditBar');
+      if (editBar) editBar.classList.remove('hidden');
+    }
+
+    function exitRulesEditMode() {
+      if (!rulesEditing) return;
+      rulesEditing = false;
+      renderRulesGrid();
+      const editBar = document.getElementById('samplingChannelRulesEditBar');
+      if (editBar) editBar.classList.add('hidden');
+    }
+
+    function saveRulesFromEditMode() {
+      const grid = document.getElementById('samplingChannelRulesGrid');
+      if (!grid) return;
+      const rules = getActiveRules();
+      const newRules = [];
+      const blocks = grid.querySelectorAll('.rules-block');
+      blocks.forEach((block) => {
+        const id = block.getAttribute('data-rule-id');
+        const titleInput = block.querySelector('[data-rule-field="title"]');
+        const contentTextarea = block.querySelector('[data-rule-field="content"]');
+        const orig = rules.find((r) => r.id === id) || {};
+        newRules.push({
+          id: id,
+          title: titleInput ? titleInput.value : orig.title,
+          icon: orig.icon || 'info',
+          content: contentTextarea ? contentTextarea.value : orig.content,
+        });
+      });
+      saveCustomRules(newRules);
+      exitRulesEditMode();
+    }
+
+    // ---------- Column management ----------
+    function openColumnModal() {
+      const modal = document.getElementById('samplingChannelColumnModal');
+      if (modal) { modal.classList.remove('hidden'); renderColumnList(); }
+    }
+
+    function closeColumnModal() {
+      const modal = document.getElementById('samplingChannelColumnModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function renderColumnList() {
+      const list = document.getElementById('samplingChannelColumnList');
+      if (!list) return;
+      const cols = getSamplingChannelOnlineCols();
+      list.innerHTML = '';
+      cols.forEach((col, idx) => {
+        const li = document.createElement('li');
+        li.className = 'sc-col-item';
+        li.innerHTML =
+          '<span class="sc-col-item-drag"><span class="material-symbols-outlined">drag_indicator</span></span>' +
+          '<span class="sc-col-key">' + (col.key || '') + '</span>' +
+          '<input type="text" value="' + (col.label || '') + '" data-col-label="' + idx + '" placeholder="列显示名" />' +
+          '<button type="button" class="sc-col-item-remove" data-remove-col="' + idx + '" title="删除此列"><span class="material-symbols-outlined" style="font-size:1rem">close</span></button>';
+        list.appendChild(li);
+      });
+    }
+
+    function collectColumnsFromModal() {
+      const cols = getSamplingChannelOnlineCols();
+      const list = document.getElementById('samplingChannelColumnList');
+      if (!list) return cols;
+      const items = list.querySelectorAll('.sc-col-item');
+      const result = [];
+      items.forEach((item) => {
+        const labelInput = item.querySelector('input[data-col-label]');
+        const label = labelInput ? labelInput.value.trim() : '';
+        const idx = labelInput ? parseInt(labelInput.getAttribute('data-col-label') || '', 10) : -1;
+        const origKey = (idx >= 0 && idx < cols.length) ? cols[idx].key : '';
+        // Derive a stable key from label if possible, keep original key
+        if (label) {
+          result.push({ key: origKey || label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''), label: label });
+        }
+      });
+      return result;
+    }
+
+    function saveColumnsFromModal() {
+      const newCols = collectColumnsFromModal();
+      if (newCols.length === 0) { alert('至少需要保留一列。'); return; }
+      saveCustomColumns(newCols);
+      closeColumnModal();
+      // Re-render table with new columns, migrate existing row data
+      migrateRowsToColumns();
+      renderAllSamplingChannelOnlineRows();
+    }
+
+    function resetColumnsToDefault() {
+      saveCustomColumns([]);
+      closeColumnModal();
+      migrateRowsToColumns();
+      renderAllSamplingChannelOnlineRows();
+    }
+
+    function migrateRowsToColumns() {
+      const cols = getSamplingChannelOnlineCols();
+      const colKeys = cols.map((c) => c.key);
+      const newRows = state.samplingChannelOnlineRows.map((oldRow) => {
+        const newRow = {};
+        colKeys.forEach((k) => { newRow[k] = oldRow[k] || ''; });
+        return newRow;
+      });
+      state.samplingChannelOnlineRows = newRows;
+      saveSamplingChannelOnlineDraft();
+    }
+
+    function handleColumnListClick(event) {
+      const removeBtn = event.target.closest('[data-remove-col]');
+      if (removeBtn) {
+        const cols = getSamplingChannelOnlineCols();
+        const idx = parseInt(removeBtn.getAttribute('data-remove-col'), 10);
+        if (isNaN(idx) || idx < 0 || idx >= cols.length) return;
+        // Hack: temporarily set customColumns so renderColumnList reflects removal
+        const current = collectColumnsFromModal();
+        current.splice(idx, 1);
+        // Rebuild list with the spliced data
+        const list = document.getElementById('samplingChannelColumnList');
+        if (list) {
+          list.innerHTML = '';
+          current.forEach((col, i) => {
+            const li = document.createElement('li');
+            li.className = 'sc-col-item';
+            li.innerHTML =
+              '<span class="sc-col-item-drag"><span class="material-symbols-outlined">drag_indicator</span></span>' +
+              '<span class="sc-col-key">' + (col.key || '') + '</span>' +
+              '<input type="text" value="' + (col.label || '') + '" data-col-label="' + i + '" placeholder="列显示名" />' +
+              '<button type="button" class="sc-col-item-remove" data-remove-col="' + i + '" title="删除此列"><span class="material-symbols-outlined" style="font-size:1rem">close</span></button>';
+            list.appendChild(li);
+          });
+        }
+      }
+    }
+
+    function handleAddColumn() {
+      const current = collectColumnsFromModal();
+      const newKey = 'col_' + Date.now().toString(36);
+      current.push({ key: newKey, label: '' });
+      const list = document.getElementById('samplingChannelColumnList');
+      if (list) {
+        list.innerHTML = '';
+        current.forEach((col, i) => {
+          const li = document.createElement('li');
+          li.className = 'sc-col-item';
+          li.innerHTML =
+            '<span class="sc-col-item-drag"><span class="material-symbols-outlined">drag_indicator</span></span>' +
+            '<span class="sc-col-key">' + (col.key || '') + '</span>' +
+            '<input type="text" value="' + (col.label || '') + '" data-col-label="' + i + '" placeholder="列显示名" />' +
+            '<button type="button" class="sc-col-item-remove" data-remove-col="' + i + '" title="删除此列"><span class="material-symbols-outlined" style="font-size:1rem">close</span></button>';
+          list.appendChild(li);
+        });
+      }
+    }
+
+    // Load saved rules/columns on init
+    loadCustomRules();
+    loadCustomColumns();
+    renderRulesGrid();
 
     function loadSamplingChannelOnlineDraft() {
       try {
@@ -6108,6 +6381,31 @@ function bindEvents() {
     if (els.samplingChannelOnlineAddRow) els.samplingChannelOnlineAddRow.addEventListener('click', addSamplingChannelOnlineRow);
     if (els.samplingChannelOnlineClear) els.samplingChannelOnlineClear.addEventListener('click', clearSamplingChannelOnlineRows);
     if (els.samplingChannelOnlineExportCSV) els.samplingChannelOnlineExportCSV.addEventListener('click', exportSamplingChannelOnlineCSV);
+
+    // Rules edit button
+    const rulesEditBtn = document.getElementById('samplingChannelRulesEditBtn');
+    const rulesSaveBtn = document.getElementById('samplingChannelRulesSaveBtn');
+    const rulesCancelBtn = document.getElementById('samplingChannelRulesCancelBtn');
+    if (rulesEditBtn) rulesEditBtn.addEventListener('click', enterRulesEditMode);
+    if (rulesSaveBtn) rulesSaveBtn.addEventListener('click', saveRulesFromEditMode);
+    if (rulesCancelBtn) rulesCancelBtn.addEventListener('click', exitRulesEditMode);
+
+    // Column management
+    const colManageBtn = document.getElementById('samplingChannelOnlineManageCols');
+    const colModalClose = document.getElementById('samplingChannelColumnModalClose');
+    const colModalSave = document.getElementById('samplingChannelColumnSave');
+    const colModalReset = document.getElementById('samplingChannelColumnReset');
+    const colModalAdd = document.getElementById('samplingChannelColumnAdd');
+    const colModalBackdrop = document.querySelector('#samplingChannelColumnModal .sc-col-modal-backdrop');
+    const colList = document.getElementById('samplingChannelColumnList');
+
+    if (colManageBtn) colManageBtn.addEventListener('click', openColumnModal);
+    if (colModalClose) colModalClose.addEventListener('click', closeColumnModal);
+    if (colModalBackdrop) colModalBackdrop.addEventListener('click', closeColumnModal);
+    if (colModalSave) colModalSave.addEventListener('click', saveColumnsFromModal);
+    if (colModalReset) colModalReset.addEventListener('click', resetColumnsToDefault);
+    if (colModalAdd) colModalAdd.addEventListener('click', handleAddColumn);
+    if (colList) colList.addEventListener('click', handleColumnListClick);
   }
   if (els.templateBuilderProjectName) {
     els.templateBuilderProjectName.addEventListener('input', (event) => {
