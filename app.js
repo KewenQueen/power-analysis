@@ -515,6 +515,8 @@ const els = {
   templateBuilderDisclosure: document.getElementById('templateBuilderDisclosure'),
   samplingChannelLocalFile: document.getElementById('samplingChannelLocalFile'),
   samplingChannelLocalFileName: document.getElementById('samplingChannelLocalFileName'),
+  samplingChannelOnlineToggle: document.getElementById('samplingChannelOnlineToggle'),
+  samplingChannelOnlineForm: document.getElementById('samplingChannelOnlineForm'),
   templateBuilderProjectName: document.getElementById('templateBuilderProjectName'),
   templateBuilderStatus: document.getElementById('templateBuilderStatus'),
   templateBuilderHead: document.getElementById('templateBuilderHead'),
@@ -5880,6 +5882,17 @@ function bindEvents() {
       const file = els.samplingChannelLocalFile.files && els.samplingChannelLocalFile.files[0];
       els.samplingChannelLocalFileName.textContent = file ? file.name : '选择本地文档';
       els.samplingChannelLocalFileName.title = file ? file.name : '';
+    });
+  }
+  if (els.samplingChannelOnlineToggle && els.samplingChannelOnlineForm) {
+    els.samplingChannelOnlineToggle.addEventListener('click', () => {
+      const willOpen = els.samplingChannelOnlineForm.classList.contains('hidden');
+      els.samplingChannelOnlineForm.classList.toggle('hidden', !willOpen);
+      els.samplingChannelOnlineToggle.classList.toggle('is-active', willOpen);
+      els.samplingChannelOnlineToggle.setAttribute('aria-expanded', String(willOpen));
+      const label = els.samplingChannelOnlineToggle.querySelector('.sampling-channel-online-action > span:first-child');
+      if (label) label.textContent = willOpen ? '收起填写模板' : '展开填写模板';
+      if (willOpen) els.samplingChannelOnlineForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
   }
   if (els.templateBuilderProjectName) {

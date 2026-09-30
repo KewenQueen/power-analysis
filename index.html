@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026100116" />
+    <link rel="stylesheet" href="./style.css?v=2026100117" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -374,12 +374,21 @@
                 </label>
                 <input id="samplingChannelLocalFile" type="file" accept=".xlsx,.xls,.csv" class="hidden" />
               </article>
-              <article class="sampling-channel-card">
+              <button id="samplingChannelOnlineToggle" type="button" class="sampling-channel-card sampling-channel-online-card" aria-expanded="false" aria-controls="samplingChannelOnlineForm">
                 <span class="sampling-channel-icon"><span class="material-symbols-outlined">edit_note</span></span>
-                <div><strong>在线填写</strong><small>标准字段模板稍后补充</small></div>
-                <div class="sampling-channel-placeholder"><span class="material-symbols-outlined">view_column</span>填写区域占位</div>
-                <button type="button" class="template-btn template-btn-secondary" disabled>填写模板待上传</button>
-              </article>
+                <span><strong>在线填写</strong><small>点击后在下方展开填写模板</small></span>
+                <span class="sampling-channel-online-action"><span>展开填写模板</span><span class="material-symbols-outlined">expand_more</span></span>
+              </button>
+            </div>
+            <div id="samplingChannelOnlineForm" class="sampling-channel-online-form hidden">
+              <div class="sampling-channel-online-form-heading">
+                <div><strong>采样通道在线填写模板</strong><small>标准字段模板稍后补充，当前先展示结构占位。</small></div>
+                <span class="sampling-channel-badge">模板待上传</span>
+              </div>
+              <div class="sampling-channel-form-placeholder">
+                <span class="material-symbols-outlined">table_rows</span>
+                <div><strong>填写区域占位</strong><small>后续将在此提供采样通道名称、类型、映射关系等标准字段。</small></div>
+              </div>
             </div>
           </section>
 
@@ -888,9 +897,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026100116"></script>
-    <script src="./supabase-auth.js?v=2026100116"></script>
-    <script src="./app.js?v=2026100116"></script>
+    <script src="./config.js?v=2026100117"></script>
+    <script src="./supabase-auth.js?v=2026100117"></script>
+    <script src="./app.js?v=2026100117"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
