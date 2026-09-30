@@ -466,7 +466,7 @@ body.feature-page-mode #appShell main > :not(#appTopBar):not(.feature-page) {
 
 .feature-entry-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
 }
 
@@ -2014,4 +2014,11 @@ body.col-resizing {
 @media (max-width: 760px) {
   .export-destination-tabs, .export-form-grid { grid-template-columns: 1fr; }
   .export-form-wide { grid-column: auto; }
+}
+
+
+.template-management-divider {
+  height: 1px;
+  margin: 1.5rem 0;
+  background: linear-gradient(90deg, transparent, #c7d2fe 18%, #c7d2fe 82%, transparent);
 }

@@ -512,7 +512,6 @@ const els = {
   templatePrevBtn: document.getElementById('templatePrevBtn'),
   templateNextBtn: document.getElementById('templateNextBtn'),
   // Template builder
-  templateBuilderPage: document.getElementById('templateBuilderPage'),
   templateBuilderProjectName: document.getElementById('templateBuilderProjectName'),
   templateBuilderStatus: document.getElementById('templateBuilderStatus'),
   templateBuilderHead: document.getElementById('templateBuilderHead'),
@@ -2621,8 +2620,10 @@ async function openFeaturePage(targetId) {
   document.body.classList.add('feature-page-mode');
   target.classList.remove('hidden');
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  if (targetId === 'templateBuilderPage' && !state.templateBuilder.ready) await initTemplateBuilder();
-  if (targetId === 'projectTemplatePage') switchTemplateView('list');
+  if (targetId === 'projectTemplatePage') {
+    switchTemplateView('list');
+    if (!state.templateBuilder.ready) await initTemplateBuilder();
+  }
 }
 
 function closeFeaturePage() {
