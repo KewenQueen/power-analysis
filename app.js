@@ -5874,7 +5874,7 @@ function bindEvents() {
   });
   if (els.templateBuilderDisclosure) {
     els.templateBuilderDisclosure.addEventListener('toggle', async () => {
-      if (els.templateBuilderDisclosure.open && !state.templateBuilder.ready) await initTemplateBuilder();
+      if (els.templateBuilderDisclosure.open && els.templateBuilderBody && !state.templateBuilder.ready) await initTemplateBuilder();
     });
   }
   if (els.samplingChannelLocalFile) {
