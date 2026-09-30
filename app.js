@@ -6325,24 +6325,42 @@ function bindEvents() {
 
     function clearSamplingChannelOnlineRows() {
       if (state.samplingChannelOnlineRows.length === 0) return;
-      if (!window.confirm('确定要清空所有已填写的通道记录吗？此操作不可撤销。')) return;
+      const dirty = hasUnsavedChanges();
+      let msg = '确定要清空所有已填写的通道记录吗？此操作不可撤销。';
+      if (dirty) msg += '\n\n⚠ 当前有未保存的修改，清空后数据无法恢复。';
+      msg += '\n\n请再次确认：清空后数据将永久删除。';
+      if (!window.confirm(msg)) return;
+      // Two-level confirmation
+      if (!window.confirm('再次确认：清空所有 ' + state.samplingChannelOnlineRows.length + ' 行通道记录？')) return;
       state.samplingChannelOnlineRows = [];
-      saveSamplingChannelOnlineDraft();
+      clearSamplingChannelOnlineCache();
       renderAllSamplingChannelOnlineRows();
     }
 
-    function exportSamplingChannelOnlineCSV() {
+    function hasUnsavedChanges() {
+      try {
+        const saved = localStorage.getItem(defaultCsvDataKey);
+        const current = JSON.stringify(state.samplingChannelOnlineRows);
+        return saved !== current;
+      } catch { return true; }
+    }
+
+    function clearSamplingChannelOnlineCache() {
+      try { localStorage.removeItem(defaultCsvDataKey); } catch { /* ignore */ }
+    }
+
+    function exportSamplingChannelOnlineExcel() {
       if (state.samplingChannelOnlineRows.length === 0) {
         alert('当前没有填写任何通道记录，请先添加行并填写数据。');
         return;
       }
       const cols = getSamplingChannelOnlineCols();
+      // Build simple XLSX-like CSV with BOM (widely compatible with Excel)
       const header = cols.map((c) => c.label).join(',');
       const csvLines = [header];
       for (const row of state.samplingChannelOnlineRows) {
         const values = cols.map((col) => {
           const v = (row[col.key] || '');
-          // Escape CSV: wrap in quotes if contains comma, newline, or quote
           if (/[",\n\r]/.test(v)) return '"' + v.replace(/"/g, '""') + '"';
           return v;
         });
@@ -6357,6 +6375,98 @@ function bindEvents() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      // Clear cache after successful download
+      clearSamplingChannelOnlineCache();
+    }
+
+    function exportSamplingChannelOnlineLark() {
+      if (state.samplingChannelOnlineRows.length === 0) {
+        alert('当前没有填写任何通道记录，请先添加行并填写数据。');
+        return;
+      }
+      const cloudUrl = window.POWER_ANALYSIS_CONFIG && window.POWER_ANALYSIS_CONFIG.cloudExportEndpoint;
+      if (!cloudUrl) {
+        alert('云文档导出接口未配置，请联系管理员。');
+        return;
+      }
+      // Check auth: must be logged in (not guest / standalone admin)
+      if (isGuestMode() || isStandaloneAdminMode()) {
+        alert('导出到云文档需要使用 Supabase 账号登录，当前处于游客/独立管理员模式。');
+        return;
+      }
+      const cols = getSamplingChannelOnlineCols();
+      const rows = state.samplingChannelOnlineRows.map((row) => {
+        return cols.map((col) => (row[col.key] || ''));
+      });
+      const header = cols.map((c) => c.label);
+      // Ask user for naming
+      const docName = window.prompt('请输入云文档名称（留空则使用默认名称）：', '采样通道梳理-在线填写');
+      if (docName === null) return; // user cancelled
+      const sheetName = window.prompt('请输入 Sheet 名称（留空则使用默认名称）：', '采样通道梳理');
+      if (sheetName === null) return;
+      (async () => {
+        try {
+          const client = await getSupabaseClient();
+          const { data: { session } } = await client.auth.getSession();
+          if (!session || !session.access_token) {
+            alert('登录状态已过期，请刷新页面重新登录。');
+            return;
+          }
+          const res = await fetch(cloudUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer ' + session.access_token,
+            },
+            body: JSON.stringify({
+              docName: docName || '采样通道梳理-在线填写',
+              sheetName: sheetName || '采样通道梳理',
+              header: header,
+              rows: rows,
+            }),
+          });
+          if (!res.ok) {
+            const body = await res.text();
+            throw new Error('云端导出失败（' + res.status + '）：' + (body || '未知错误'));
+          }
+          const result = await res.json();
+          alert('已成功导出到云文档！\n文档链接：' + (result.url || '请在飞书中查看'));
+          // Clear cache after successful download
+          clearSamplingChannelOnlineCache();
+        } catch (err) {
+          alert('云文档导出失败：' + (err.message || '网络错误，请稍后重试'));
+        }
+      })();
+    }
+
+    function toggleExportDropdown() {
+      const menu = document.getElementById('samplingChannelOnlineExportMenu');
+      if (!menu) return;
+      const isOpen = !menu.classList.contains('hidden');
+      menu.classList.toggle('hidden', isOpen);
+      // Close when clicking outside
+      if (!isOpen) {
+        setTimeout(() => {
+          const handler = function (event) {
+            const group = document.querySelector('.sampling-channel-export-group');
+            if (group && !group.contains(event.target)) {
+              menu.classList.add('hidden');
+              document.removeEventListener('click', handler);
+            }
+          };
+          document.addEventListener('click', handler);
+        }, 0);
+      }
+    }
+
+    function handleExportFormatClick(event) {
+      const item = event.target.closest('[data-export-format]');
+      if (!item) return;
+      const format = item.getAttribute('data-export-format');
+      const menu = document.getElementById('samplingChannelOnlineExportMenu');
+      if (menu) menu.classList.add('hidden');
+      if (format === 'excel') exportSamplingChannelOnlineExcel();
+      else if (format === 'lark') exportSamplingChannelOnlineLark();
     }
 
     // Load saved draft
@@ -6380,7 +6490,14 @@ function bindEvents() {
     // Button handlers
     if (els.samplingChannelOnlineAddRow) els.samplingChannelOnlineAddRow.addEventListener('click', addSamplingChannelOnlineRow);
     if (els.samplingChannelOnlineClear) els.samplingChannelOnlineClear.addEventListener('click', clearSamplingChannelOnlineRows);
-    if (els.samplingChannelOnlineExportCSV) els.samplingChannelOnlineExportCSV.addEventListener('click', exportSamplingChannelOnlineCSV);
+
+    // Export dropdown
+    const exportMainBtn = document.getElementById('samplingChannelOnlineExportCSV');
+    const exportToggleBtn = document.getElementById('samplingChannelOnlineExportToggle');
+    const exportMenu = document.getElementById('samplingChannelOnlineExportMenu');
+    if (exportMainBtn) exportMainBtn.addEventListener('click', exportSamplingChannelOnlineExcel);
+    if (exportToggleBtn) exportToggleBtn.addEventListener('click', (event) => { event.stopPropagation(); toggleExportDropdown(); });
+    if (exportMenu) exportMenu.addEventListener('click', handleExportFormatClick);
 
     // Rules edit button
     const rulesEditBtn = document.getElementById('samplingChannelRulesEditBtn');

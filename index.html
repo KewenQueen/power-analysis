@@ -395,11 +395,24 @@
                 </div>
                 <div class="sampling-channel-online-actions">
                   <button id="samplingChannelOnlineAddRow" type="button" class="template-btn template-btn-primary template-btn-sm" title="新增一行">
-                    <span class="material-symbols-outlined text-sm">add_row</span>新增行
+                    <span class="material-symbols-outlined text-sm">add</span> 新增一行
                   </button>
-                  <button id="samplingChannelOnlineExportCSV" type="button" class="template-btn template-btn-secondary template-btn-sm" title="导出为 CSV">
-                    <span class="material-symbols-outlined text-sm">download</span>导出 CSV
-                  </button>
+                  <div class="sampling-channel-export-group">
+                    <button id="samplingChannelOnlineExportCSV" type="button" class="template-btn template-btn-secondary template-btn-sm export-main-btn" title="导出数据">
+                      <span class="material-symbols-outlined text-sm">download</span>导出
+                    </button>
+                    <button id="samplingChannelOnlineExportToggle" type="button" class="template-btn template-btn-secondary template-btn-sm export-toggle-btn" title="选择导出格式" aria-haspopup="true">
+                      <span class="material-symbols-outlined text-sm">arrow_drop_down</span>
+                    </button>
+                    <ul id="samplingChannelOnlineExportMenu" class="export-dropdown-menu hidden" role="menu">
+                      <li role="menuitem" data-export-format="excel">
+                        <span class="material-symbols-outlined">table</span>导出 Excel
+                      </li>
+                      <li role="menuitem" data-export-format="lark">
+                        <span class="material-symbols-outlined">cloud</span>导出云文档
+                      </li>
+                    </ul>
+                  </div>
                   <button id="samplingChannelOnlineClear" type="button" class="template-btn template-btn-danger template-btn-sm" title="清空全部行">
                     <span class="material-symbols-outlined text-sm">delete</span>清空
                   </button>
