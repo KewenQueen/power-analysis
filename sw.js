@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'power-analysis-pwa-v28';
+const CACHE_VERSION = 'power-analysis-pwa-v29';
 const APP_SHELL = [
   '/',
   '/index.html',
