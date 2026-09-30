@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026100114" />
+    <link rel="stylesheet" href="./style.css?v=2026100115" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -324,9 +324,19 @@
           </div>
         </div>
 
-        <!-- 生成新模板：与模板库上下排列 -->
+        <!-- 生成新模板：默认折叠，需要时展开 -->
         <div class="template-management-divider" aria-hidden="true"></div>
-        <div class="panel rounded-3xl p-5 template-builder-section">
+        <details id="templateBuilderDisclosure" class="template-builder-disclosure">
+          <summary class="template-builder-summary">
+            <span class="feature-entry-icon"><span class="material-symbols-outlined">table_edit</span></span>
+            <span class="template-builder-summary-copy">
+              <strong>生成新模板</strong>
+              <small>展开后可进行采样通道梳理，并在线编辑和导出 Excel 模板</small>
+            </span>
+            <span class="material-symbols-outlined template-builder-chevron">expand_more</span>
+          </summary>
+          <div class="template-builder-collapsible-body">
+            <div class="panel rounded-3xl p-5 template-builder-section">
           <div class="flex items-start justify-between gap-3 flex-wrap">
             <div class="flex items-start gap-3 min-w-0">
               <div class="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center flex-shrink-0">
@@ -339,6 +349,39 @@
             </div>
             <div id="templateBuilderStatus" class="status-chip status-chip-sm">等待进入编辑器</div>
           </div>
+
+          <section class="sampling-channel-section mt-4" aria-labelledby="samplingChannelTitle">
+            <div class="sampling-channel-heading">
+              <div>
+                <h3 id="samplingChannelTitle"><span class="material-symbols-outlined">account_tree</span>采样通道梳理</h3>
+                <p>先选择资料准备方式；标准填写格式确定后，将在此处补充解析、校验与字段映射。</p>
+              </div>
+              <span class="sampling-channel-badge">框架已预留</span>
+            </div>
+            <div class="sampling-channel-grid">
+              <article class="sampling-channel-card">
+                <span class="sampling-channel-icon"><span class="material-symbols-outlined">cloud</span></span>
+                <div><strong>云文档导入</strong><small>粘贴飞书云文档或电子表格链接</small></div>
+                <input id="samplingChannelCloudUrl" type="url" placeholder="https://..." aria-label="采样通道云文档链接" />
+                <button type="button" class="template-btn template-btn-secondary" disabled>标准格式待配置</button>
+              </article>
+              <article class="sampling-channel-card">
+                <span class="sampling-channel-icon"><span class="material-symbols-outlined">upload_file</span></span>
+                <div><strong>本地文档导入</strong><small>预留 Excel / CSV 文档选择入口</small></div>
+                <label for="samplingChannelLocalFile" class="sampling-channel-file-picker">
+                  <span class="material-symbols-outlined">attach_file</span>
+                  <span id="samplingChannelLocalFileName">选择本地文档</span>
+                </label>
+                <input id="samplingChannelLocalFile" type="file" accept=".xlsx,.xls,.csv" class="hidden" />
+              </article>
+              <article class="sampling-channel-card">
+                <span class="sampling-channel-icon"><span class="material-symbols-outlined">edit_note</span></span>
+                <div><strong>在线填写</strong><small>标准字段模板稍后补充</small></div>
+                <div class="sampling-channel-placeholder"><span class="material-symbols-outlined">view_column</span>填写区域占位</div>
+                <button type="button" class="template-btn template-btn-secondary" disabled>填写模板待上传</button>
+              </article>
+            </div>
+          </section>
 
           <div class="template-builder-toolbar mt-4">
             <div class="template-builder-name-field">
@@ -377,7 +420,9 @@
             <span id="templateBuilderSummary">尚未加载编辑器</span>
             <span>删除行只影响在线草稿，点击“恢复标准模板”可随时还原。</span>
           </div>
-        </div>
+            </div>
+          </div>
+        </details>
       </section>
 
       <!-- 拆解数据对比分析二级页面 -->
@@ -843,9 +888,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026100114"></script>
-    <script src="./supabase-auth.js?v=2026100114"></script>
-    <script src="./app.js?v=2026100114"></script>
+    <script src="./config.js?v=2026100115"></script>
+    <script src="./supabase-auth.js?v=2026100115"></script>
+    <script src="./app.js?v=2026100115"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

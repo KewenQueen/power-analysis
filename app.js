@@ -512,6 +512,9 @@ const els = {
   templatePrevBtn: document.getElementById('templatePrevBtn'),
   templateNextBtn: document.getElementById('templateNextBtn'),
   // Template builder
+  templateBuilderDisclosure: document.getElementById('templateBuilderDisclosure'),
+  samplingChannelLocalFile: document.getElementById('samplingChannelLocalFile'),
+  samplingChannelLocalFileName: document.getElementById('samplingChannelLocalFileName'),
   templateBuilderProjectName: document.getElementById('templateBuilderProjectName'),
   templateBuilderStatus: document.getElementById('templateBuilderStatus'),
   templateBuilderHead: document.getElementById('templateBuilderHead'),
@@ -2620,10 +2623,7 @@ async function openFeaturePage(targetId) {
   document.body.classList.add('feature-page-mode');
   target.classList.remove('hidden');
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  if (targetId === 'projectTemplatePage') {
-    switchTemplateView('list');
-    if (!state.templateBuilder.ready) await initTemplateBuilder();
-  }
+  if (targetId === 'projectTemplatePage') switchTemplateView('list');
 }
 
 function closeFeaturePage() {
@@ -5870,6 +5870,18 @@ function bindEvents() {
   document.querySelectorAll('[data-feature-back]').forEach((button) => {
     button.addEventListener('click', closeFeaturePage);
   });
+  if (els.templateBuilderDisclosure) {
+    els.templateBuilderDisclosure.addEventListener('toggle', async () => {
+      if (els.templateBuilderDisclosure.open && !state.templateBuilder.ready) await initTemplateBuilder();
+    });
+  }
+  if (els.samplingChannelLocalFile) {
+    els.samplingChannelLocalFile.addEventListener('change', () => {
+      const file = els.samplingChannelLocalFile.files && els.samplingChannelLocalFile.files[0];
+      els.samplingChannelLocalFileName.textContent = file ? file.name : '选择本地文档';
+      els.samplingChannelLocalFileName.title = file ? file.name : '';
+    });
+  }
   if (els.templateBuilderProjectName) {
     els.templateBuilderProjectName.addEventListener('input', (event) => {
       state.templateBuilder.projectName = event.target.value;
