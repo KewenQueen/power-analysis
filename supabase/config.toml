@@ -1,0 +1,2 @@
+[functions.lark-sheet-export]
+verify_jwt = true

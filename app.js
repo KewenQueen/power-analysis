@@ -451,6 +451,8 @@ const state = {
     templateId: '',
     files: [],
     activePreviewId: null,
+    destination: 'local',
+    directoryHandle: null,
   },
 
   // Compare groups (in-memory). Each group is an independent comparison table.
@@ -592,9 +594,28 @@ const els = {
   dataExportPreviewTip: document.getElementById('dataExportPreviewTip'),
   dataExportRunStatus: document.getElementById('dataExportRunStatus'),
   dataExportResultActions: document.getElementById('dataExportResultActions'),
-  dataExportDownloadList: document.getElementById('dataExportDownloadList'),
-  dataExportDownloadAllBtn: document.getElementById('dataExportDownloadAllBtn'),
   dataExportTip: document.getElementById('dataExportTip'),
+  dataExportDestinationRadios: document.querySelectorAll('input[name="dataExportDestination"]'),
+  dataExportLocalPanel: document.getElementById('dataExportLocalPanel'),
+  dataExportCloudNewPanel: document.getElementById('dataExportCloudNewPanel'),
+  dataExportCloudExistingPanel: document.getElementById('dataExportCloudExistingPanel'),
+  dataExportLocalName: document.getElementById('dataExportLocalName'),
+  dataExportChooseFolderBtn: document.getElementById('dataExportChooseFolderBtn'),
+  dataExportFolderName: document.getElementById('dataExportFolderName'),
+  dataExportLocalSaveBtn: document.getElementById('dataExportLocalSaveBtn'),
+  dataExportCloudName: document.getElementById('dataExportCloudName'),
+  dataExportCloudFolder: document.getElementById('dataExportCloudFolder'),
+  dataExportCloudNewSource: document.getElementById('dataExportCloudNewSource'),
+  dataExportCloudCreateBtn: document.getElementById('dataExportCloudCreateBtn'),
+  dataExportCloudUrl: document.getElementById('dataExportCloudUrl'),
+  dataExportCloudExistingSource: document.getElementById('dataExportCloudExistingSource'),
+  dataExportCloudSheetMode: document.getElementById('dataExportCloudSheetMode'),
+  dataExportCloudSheetNameLabel: document.getElementById('dataExportCloudSheetNameLabel'),
+  dataExportCloudSheetName: document.getElementById('dataExportCloudSheetName'),
+  dataExportCloudStartCellField: document.getElementById('dataExportCloudStartCellField'),
+  dataExportCloudStartCell: document.getElementById('dataExportCloudStartCell'),
+  dataExportCloudWriteBtn: document.getElementById('dataExportCloudWriteBtn'),
+  dataExportDestinationStatus: document.getElementById('dataExportDestinationStatus'),
   // Header tooltip
   headerTooltip: document.getElementById('headerTooltip'),
 };
@@ -2867,10 +2888,7 @@ function renderDataExportWorkflow() {
   if (!els.dataExportFileList) return;
   const template = getDataExportTemplate();
   const files = state.dataExport.files;
-  const csvFiles = files.filter((item) => item.inputType === 'csv');
-  const excelFiles = files.filter((item) => item.inputType === 'excel');
   const previewed = files.filter((item) => item.processedRows && item.processedRows.length);
-  const generated = csvFiles.filter((item) => item.workbookBlob);
 
   setDataExportStatus(els.dataExportTemplateStatus, template ? '已选择' : '待选择', template ? 'complete' : '');
   setDataExportStatus(els.dataExportImportStatus, files.length ? `已导入 ${files.length} 个` : (template ? '待导入' : '等待模板'), files.length ? 'complete' : '');
@@ -2878,12 +2896,11 @@ function renderDataExportWorkflow() {
   else if (previewed.length === files.length) setDataExportStatus(els.dataExportPreviewStatus, '已生成', 'complete');
   else setDataExportStatus(els.dataExportPreviewStatus, '待预览');
   if (!files.length || !previewed.length) setDataExportStatus(els.dataExportRunStatus, '等待预览');
-  else if (!csvFiles.length) setDataExportStatus(els.dataExportRunStatus, 'Excel 已跳过', 'skipped');
-  else if (generated.length === csvFiles.length) setDataExportStatus(els.dataExportRunStatus, '可下载', 'complete');
-  else setDataExportStatus(els.dataExportRunStatus, '等待生成');
+  else if (previewed.length === files.length) setDataExportStatus(els.dataExportRunStatus, '可导出', 'complete');
+  else setDataExportStatus(els.dataExportRunStatus, '部分可导出');
 
   els.dataExportPreviewBtn.disabled = !template || !files.length;
-  els.dataExportResultActions.classList.toggle('hidden', !generated.length);
+  els.dataExportResultActions.classList.toggle('hidden', !previewed.length);
   els.dataExportReimportBtn.classList.toggle('hidden', !files.length);
   els.dataExportDropzone.classList.toggle('hidden', files.length > 0);
   els.dataExportFileList.classList.toggle('hidden', !files.length);
@@ -2894,9 +2911,8 @@ function renderDataExportWorkflow() {
   else els.dataExportPreviewTip.textContent = `共 ${files.length} 个文件待生成在线预览。CSV 将先在浏览器中适配模板，Excel 将直接读取功耗采集数据表。`;
 
   if (!previewed.length) els.dataExportTip.textContent = '请先在第三步生成在线预览。';
-  else if (!csvFiles.length) els.dataExportTip.textContent = `已导入 ${excelFiles.length} 个 Excel 文件，无需再次导出。`;
-  else if (generated.length === csvFiles.length) els.dataExportTip.textContent = `已完成 ${generated.length} 个 CSV 的模板适配，可下载生成的 Excel 结果。`;
-  else els.dataExportTip.textContent = '部分 CSV 尚未生成，请返回第三步重新生成在线预览。';
+  else if (previewed.length === files.length) els.dataExportTip.textContent = `已准备 ${previewed.length} 个文件，可保存到本地或选择一个文件导出到飞书云文档。`;
+  else els.dataExportTip.textContent = `已有 ${previewed.length} 个文件可导出，另有 ${files.length - previewed.length} 个文件尚未生成预览。`;
 
   els.dataExportFileList.innerHTML = files.map((item) => {
     const isExcel = item.inputType === 'excel';
@@ -2908,12 +2924,7 @@ function renderDataExportWorkflow() {
       <span class="analysis-file-type ${isExcel ? 'is-excel' : ''}">${isExcel ? 'Excel' : 'CSV'}</span>
     </div>`;
   }).join('');
-
-  els.dataExportDownloadList.innerHTML = generated.map((item) => `<div class="analysis-file-item">
-    <span class="analysis-file-item-icon"><span class="material-symbols-outlined">description</span></span>
-    <span class="analysis-file-item-main"><span class="analysis-file-item-name">${escapeHtml(item.fileName.replace(/\.csv$/i, '.xlsx'))}</span><span class="analysis-file-item-meta">已生成，可下载</span></span>
-    <button type="button" class="analysis-file-download" data-data-export-download="${escapeHtml(item.id)}" title="下载生成结果"><span class="material-symbols-outlined">download</span></button>
-  </div>`).join('');
+  refreshDataExportDestinationControls(previewed);
   renderDataExportPreview();
 }
 
@@ -3014,18 +3025,218 @@ async function generateDataExportPreview() {
   }
 }
 
-function downloadDataExportItem(id) {
-  const item = state.dataExport.files.find((file) => file.id === id && file.inputType === 'csv');
-  if (!item || !item.workbookBlob) return;
-  downloadBlob(item.workbookBlob, item.fileName, item.projectName);
+function getReadyDataExportFiles() {
+  return state.dataExport.files.filter((item) => item.processedRows && item.processedRows.length);
 }
 
-async function downloadAllDataExportResults() {
-  const files = state.dataExport.files.filter((item) => item.inputType === 'csv' && item.workbookBlob);
-  for (let index = 0; index < files.length; index += 1) {
-    downloadBlob(files[index].workbookBlob, files[index].fileName, files[index].projectName);
-    await new Promise((resolve) => setTimeout(resolve, 350));
+function safeExportBaseName(name, fallback = '功耗拆解结果') {
+  const safe = String(name || '').trim().replace(/[\\/:*?"<>|]+/g, '_').replace(/[. ]+$/g, '');
+  return safe || fallback;
+}
+
+function getDataExportBlob(item) {
+  return item.inputType === 'csv' ? item.workbookBlob : item.originalBlob;
+}
+
+function getDataExportExtension(item) {
+  return item.inputType === 'csv' ? '.xlsx' : (item.fileName.match(/\.[^.]+$/)?.[0] || '.xlsx');
+}
+
+function refreshDataExportDestinationControls(readyFiles = getReadyDataExportFiles()) {
+  const options = readyFiles.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.fileName)}</option>`).join('');
+  [els.dataExportCloudNewSource, els.dataExportCloudExistingSource].forEach((select) => {
+    if (!select) return;
+    const previous = select.value;
+    select.innerHTML = options || '<option value="">暂无可导出数据</option>';
+    if (readyFiles.some((item) => item.id === previous)) select.value = previous;
+  });
+  const active = readyFiles.find((item) => item.id === state.dataExport.activePreviewId) || readyFiles[0];
+  if (active) {
+    if (els.dataExportCloudNewSource && !els.dataExportCloudNewSource.value) els.dataExportCloudNewSource.value = active.id;
+    if (els.dataExportCloudExistingSource && !els.dataExportCloudExistingSource.value) els.dataExportCloudExistingSource.value = active.id;
   }
+  if (els.dataExportLocalName && !els.dataExportLocalName.value && readyFiles.length) {
+    const template = getDataExportTemplate();
+    els.dataExportLocalName.value = safeExportBaseName(template ? `${template.name}_功耗拆解结果` : '功耗拆解结果');
+  }
+  if (els.dataExportCloudName && !els.dataExportCloudName.value && readyFiles.length) {
+    const template = getDataExportTemplate();
+    els.dataExportCloudName.value = safeExportBaseName(template ? `${template.name}_功耗拆解结果` : '功耗拆解结果');
+  }
+}
+
+function renderDataExportDestination() {
+  const destination = state.dataExport.destination;
+  els.dataExportLocalPanel.classList.toggle('hidden', destination !== 'local');
+  els.dataExportCloudNewPanel.classList.toggle('hidden', destination !== 'cloud-new');
+  els.dataExportCloudExistingPanel.classList.toggle('hidden', destination !== 'cloud-existing');
+  els.dataExportDestinationRadios.forEach((radio) => {
+    radio.checked = radio.value === destination;
+    radio.closest('.export-destination-option').classList.toggle('is-active', radio.checked);
+  });
+}
+
+function setDataExportDestinationStatus(message = '', tone = '') {
+  if (!els.dataExportDestinationStatus) return;
+  els.dataExportDestinationStatus.textContent = message;
+  els.dataExportDestinationStatus.dataset.tone = tone;
+  els.dataExportDestinationStatus.classList.toggle('hidden', !message);
+}
+
+async function chooseDataExportDirectory() {
+  if (!window.showDirectoryPicker) {
+    setDataExportDestinationStatus('当前浏览器不支持直接选择目录，保存时将使用浏览器默认下载目录。', 'warning');
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    state.dataExport.directoryHandle = handle;
+    els.dataExportFolderName.textContent = `已选择：${handle.name}`;
+    setDataExportDestinationStatus('保存目录已选择。', 'success');
+  } catch (error) {
+    if (error && error.name !== 'AbortError') setDataExportDestinationStatus(`目录选择失败：${error.message}`, 'error');
+  }
+}
+
+async function saveBlobToDirectory(directoryHandle, fileName, blob) {
+  const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
+function downloadNamedBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function saveDataExportLocally() {
+  const readyFiles = getReadyDataExportFiles();
+  if (!readyFiles.length) return;
+  const baseName = safeExportBaseName(els.dataExportLocalName.value);
+  const button = els.dataExportLocalSaveBtn;
+  const original = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span>正在保存';
+  setDataExportDestinationStatus('正在保存文件…');
+  try {
+    for (let index = 0; index < readyFiles.length; index += 1) {
+      const item = readyFiles[index];
+      const blob = getDataExportBlob(item);
+      if (!blob) continue;
+      const suffix = readyFiles.length > 1 ? `_${safeExportBaseName(item.fileName.replace(/\.[^.]+$/, ''), `文件${index + 1}`)}` : '';
+      const fileName = `${baseName}${suffix}${getDataExportExtension(item)}`;
+      if (state.dataExport.directoryHandle) await saveBlobToDirectory(state.dataExport.directoryHandle, fileName, blob);
+      else downloadNamedBlob(blob, fileName);
+      if (!state.dataExport.directoryHandle) await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    setDataExportDestinationStatus(`已保存 ${readyFiles.length} 个文件${state.dataExport.directoryHandle ? `到「${state.dataExport.directoryHandle.name}」` : '到浏览器下载目录'}。`, 'success');
+  } catch (error) {
+    console.error(error);
+    setDataExportDestinationStatus(`本地保存失败：${error.message || '未知错误'}`, 'error');
+  } finally {
+    button.disabled = false;
+    button.innerHTML = original;
+  }
+}
+
+function normalizeCloudCellValue(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string') return value;
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
+function getCloudExportItem(select) {
+  const item = state.dataExport.files.find((file) => file.id === select.value);
+  if (!item || !item.processedRows || !item.processedRows.length) throw new Error('请选择已生成预览的导出内容');
+  return item;
+}
+
+async function getCloudExportHeaders() {
+  const config = window.POWER_ANALYSIS_CONFIG || {};
+  const headers = { 'Content-Type': 'application/json' };
+  if (config.supabasePublishableKey) headers.apikey = config.supabasePublishableKey;
+  let accessToken = '';
+  try {
+    const client = window.powerAuth && window.powerAuth.client;
+    if (client) {
+      const { data } = await client.auth.getSession();
+      accessToken = data && data.session ? data.session.access_token : '';
+    }
+  } catch (error) {
+    console.warn('读取登录会话失败。', error);
+  }
+  if (!accessToken) throw new Error('导出到云文档需要先使用账号登录');
+  headers.Authorization = `Bearer ${accessToken}`;
+  return headers;
+}
+
+async function callCloudExport(payload) {
+  const config = window.POWER_ANALYSIS_CONFIG || {};
+  const endpoint = config.cloudExportEndpoint || (config.supabaseUrl ? `${config.supabaseUrl}/functions/v1/lark-sheet-export` : '');
+  if (!endpoint) throw new Error('尚未配置云文档导出服务地址');
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: await getCloudExportHeaders(),
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `云文档服务请求失败（${response.status}）`);
+  return result;
+}
+
+function buildCloudExportData(item) {
+  const width = getColCount(item.processedRows);
+  return item.processedRows.map((row) => Array.from({ length: width }, (_, index) => normalizeCloudCellValue(row[index])));
+}
+
+async function runCloudExport(mode) {
+  const isNew = mode === 'new';
+  const select = isNew ? els.dataExportCloudNewSource : els.dataExportCloudExistingSource;
+  const button = isNew ? els.dataExportCloudCreateBtn : els.dataExportCloudWriteBtn;
+  const original = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = '<span class="material-symbols-outlined text-sm animate-spin">progress_activity</span>正在导出';
+  setDataExportDestinationStatus('正在连接飞书云文档服务…');
+  try {
+    const item = getCloudExportItem(select);
+    const payload = {
+      action: isNew ? 'create' : 'write',
+      title: isNew ? safeExportBaseName(els.dataExportCloudName.value) : undefined,
+      folder: isNew ? els.dataExportCloudFolder.value.trim() : undefined,
+      documentUrl: isNew ? undefined : els.dataExportCloudUrl.value.trim(),
+      sheetMode: isNew ? 'new' : els.dataExportCloudSheetMode.value,
+      sheetName: isNew ? safeExportBaseName(item.fileName.replace(/\.[^.]+$/, ''), '拆解结果') : els.dataExportCloudSheetName.value.trim(),
+      startCell: isNew ? 'A1' : els.dataExportCloudStartCell.value.trim().toUpperCase(),
+      values: buildCloudExportData(item),
+    };
+    if (!isNew && !payload.documentUrl) throw new Error('请粘贴已有云文档链接');
+    if (!payload.sheetName) throw new Error(payload.sheetMode === 'new' ? '请输入新 Sheet 名称' : '请输入已有 Sheet 名称');
+    if (!/^([A-Z]+)([1-9]\d*)$/.test(payload.startCell)) throw new Error('写入起点格式不正确，请使用 A1、B2 等格式');
+    const result = await callCloudExport(payload);
+    setDataExportDestinationStatus(isNew ? '云文档已创建并写入完成。' : '数据已写入云文档。', 'success');
+    if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
+  } catch (error) {
+    console.error(error);
+    setDataExportDestinationStatus(`云文档导出失败：${error.message || '未知错误'}`, 'error');
+  } finally {
+    button.disabled = false;
+    button.innerHTML = original;
+  }
+}
+
+function updateCloudSheetMode() {
+  const existing = els.dataExportCloudSheetMode.value === 'existing';
+  els.dataExportCloudSheetNameLabel.textContent = existing ? '已有 Sheet 名称' : '新 Sheet 名称';
+  els.dataExportCloudSheetName.placeholder = existing ? '请输入目标 Sheet 名称' : '例如：本次拆解结果';
+  els.dataExportCloudStartCellField.classList.toggle('hidden', !existing);
 }
 
 // ---------- Template list: pagination + views ----------
@@ -5556,13 +5767,20 @@ function bindEvents() {
   }
   if (els.dataExportReimportBtn) els.dataExportReimportBtn.addEventListener('click', () => els.dataExportFileInput.click());
   if (els.dataExportPreviewBtn) els.dataExportPreviewBtn.addEventListener('click', generateDataExportPreview);
-  if (els.dataExportDownloadAllBtn) els.dataExportDownloadAllBtn.addEventListener('click', downloadAllDataExportResults);
-  if (els.dataExportDownloadList) {
-    els.dataExportDownloadList.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-data-export-download]');
-      if (button) downloadDataExportItem(button.dataset.dataExportDownload);
+  els.dataExportDestinationRadios.forEach((radio) => {
+    radio.addEventListener('change', () => {
+      state.dataExport.destination = radio.value;
+      setDataExportDestinationStatus('');
+      renderDataExportDestination();
     });
-  }
+  });
+  if (els.dataExportChooseFolderBtn) els.dataExportChooseFolderBtn.addEventListener('click', chooseDataExportDirectory);
+  if (els.dataExportLocalSaveBtn) els.dataExportLocalSaveBtn.addEventListener('click', saveDataExportLocally);
+  if (els.dataExportCloudCreateBtn) els.dataExportCloudCreateBtn.addEventListener('click', () => runCloudExport('new'));
+  if (els.dataExportCloudWriteBtn) els.dataExportCloudWriteBtn.addEventListener('click', () => runCloudExport('existing'));
+  if (els.dataExportCloudSheetMode) els.dataExportCloudSheetMode.addEventListener('change', updateCloudSheetMode);
+  renderDataExportDestination();
+  updateCloudSheetMode();
   if (els.dataExportPreviewTabs) {
     els.dataExportPreviewTabs.addEventListener('click', (event) => {
       const button = event.target.closest('[data-data-export-preview]');

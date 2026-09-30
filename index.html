@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026093012" />
+    <link rel="stylesheet" href="./style.css?v=2026100113" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -786,16 +786,66 @@
           <article class="panel rounded-3xl p-5 analysis-step-card">
             <div class="analysis-step-heading">
               <span class="analysis-step-number">4</span>
-              <div><h2>数据导出</h2><p>CSV 在预览时完成模板适配并生成 Excel；导入 Excel 时无需再次导出。</p></div>
+              <div><h2>数据导出</h2><p>选择本地目录，或将预览数据写入飞书云端电子表格。</p></div>
               <span id="dataExportRunStatus" class="analysis-step-status">等待预览</span>
             </div>
             <div class="analysis-step-content">
               <div id="dataExportResultActions" class="hidden">
-                <div class="analysis-success-note"><span class="material-symbols-outlined">check_circle</span>CSV 已完成模板适配，可以下载生成结果。</div>
-                <div id="dataExportDownloadList" class="analysis-file-list"></div>
-                <button id="dataExportDownloadAllBtn" type="button" class="template-btn template-btn-primary analysis-download-all mt-3">
-                  <span class="material-symbols-outlined text-sm">download_for_offline</span> 下载全部 CSV 结果
-                </button>
+                <div class="analysis-success-note"><span class="material-symbols-outlined">check_circle</span>数据已准备完成，请选择导出地址。</div>
+
+                <div class="export-destination-tabs" role="radiogroup" aria-label="导出地址">
+                  <label class="export-destination-option is-active">
+                    <input type="radio" name="dataExportDestination" value="local" checked />
+                    <span class="material-symbols-outlined">folder</span>
+                    <span><strong>本地存储</strong><small>自定义名称和保存目录</small></span>
+                  </label>
+                  <label class="export-destination-option">
+                    <input type="radio" name="dataExportDestination" value="cloud-new" />
+                    <span class="material-symbols-outlined">add_to_drive</span>
+                    <span><strong>新建云文档</strong><small>创建飞书电子表格</small></span>
+                  </label>
+                  <label class="export-destination-option">
+                    <input type="radio" name="dataExportDestination" value="cloud-existing" />
+                    <span class="material-symbols-outlined">cloud_upload</span>
+                    <span><strong>已有云文档</strong><small>写入新建或已有 Sheet</small></span>
+                  </label>
+                </div>
+
+                <div id="dataExportLocalPanel" class="export-destination-panel">
+                  <div class="export-form-grid">
+                    <label><span>文件名称</span><input id="dataExportLocalName" type="text" placeholder="例如：功耗拆解结果" /></label>
+                    <div class="export-folder-field">
+                      <span>保存目录</span>
+                      <button id="dataExportChooseFolderBtn" type="button" class="template-btn template-btn-secondary"><span class="material-symbols-outlined text-sm">create_new_folder</span>选择目录</button>
+                      <small id="dataExportFolderName">未选择，将使用浏览器默认下载目录</small>
+                    </div>
+                  </div>
+                  <button id="dataExportLocalSaveBtn" type="button" class="template-btn template-btn-primary export-submit-btn"><span class="material-symbols-outlined text-sm">save</span>保存到本地</button>
+                  <p class="analysis-helper">支持目录选择的浏览器会保存到指定文件夹；其他浏览器将回退到默认下载目录。</p>
+                </div>
+
+                <div id="dataExportCloudNewPanel" class="export-destination-panel hidden">
+                  <div class="export-form-grid">
+                    <label><span>云文档名称</span><input id="dataExportCloudName" type="text" placeholder="例如：功耗拆解在线结果" /></label>
+                    <label><span>保存区域</span><input id="dataExportCloudFolder" type="text" placeholder="云空间文件夹链接或 folder token；留空保存到根目录" /></label>
+                    <label><span>导出内容</span><select id="dataExportCloudNewSource"></select></label>
+                  </div>
+                  <button id="dataExportCloudCreateBtn" type="button" class="template-btn template-btn-primary export-submit-btn"><span class="material-symbols-outlined text-sm">add_to_drive</span>新建并写入云文档</button>
+                  <p class="analysis-helper">云文档导出使用飞书服务，需要先通过账号登录；独立管理员或访客模式可使用本地导出。</p>
+                </div>
+
+                <div id="dataExportCloudExistingPanel" class="export-destination-panel hidden">
+                  <div class="export-form-grid">
+                    <label class="export-form-wide"><span>已有云文档链接</span><input id="dataExportCloudUrl" type="url" placeholder="https://.../sheets/..." /></label>
+                    <label><span>导出内容</span><select id="dataExportCloudExistingSource"></select></label>
+                    <label><span>写入方式</span><select id="dataExportCloudSheetMode"><option value="new">新建 Sheet</option><option value="existing">写入已有 Sheet</option></select></label>
+                    <label><span id="dataExportCloudSheetNameLabel">新 Sheet 名称</span><input id="dataExportCloudSheetName" type="text" placeholder="例如：本次拆解结果" /></label>
+                    <label id="dataExportCloudStartCellField" class="hidden"><span>写入起点</span><input id="dataExportCloudStartCell" type="text" value="A1" placeholder="A1" /></label>
+                  </div>
+                  <button id="dataExportCloudWriteBtn" type="button" class="template-btn template-btn-primary export-submit-btn"><span class="material-symbols-outlined text-sm">cloud_upload</span>写入已有云文档</button>
+                  <p class="analysis-helper">写入已有 Sheet 会从指定起点覆盖对应区域，请确认目标位置没有需要保留的数据。</p>
+                </div>
+                <div id="dataExportDestinationStatus" class="export-destination-status hidden"></div>
               </div>
               <p id="dataExportTip" class="analysis-helper analysis-tip">请先完成在线预览。</p>
             </div>
@@ -811,9 +861,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026093012"></script>
-    <script src="./supabase-auth.js?v=2026093012"></script>
-    <script src="./app.js?v=2026093012"></script>
+    <script src="./config.js?v=2026100113"></script>
+    <script src="./supabase-auth.js?v=2026100113"></script>
+    <script src="./app.js?v=2026100113"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

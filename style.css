@@ -1985,3 +1985,33 @@ body.col-resizing {
 .analysis-file-list.hidden {
   display: none;
 }
+
+
+/* ===== 数据导出地址 ===== */
+.export-destination-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; margin: 0.85rem 0; }
+.export-destination-option { display: flex; min-width: 0; align-items: center; gap: 0.6rem; border: 1px solid #dbe3f1; border-radius: 0.9rem; background: #fff; padding: 0.8rem; color: #475569; cursor: pointer; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
+.export-destination-option:hover { border-color: #a5b4fc; background: #f8faff; }
+.export-destination-option.is-active { border-color: #6366f1; background: #eef2ff; color: #3730a3; box-shadow: 0 0 0 3px rgba(99, 102, 241, .1); }
+.export-destination-option input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.export-destination-option > .material-symbols-outlined { flex: 0 0 auto; font-size: 1.35rem; }
+.export-destination-option > span:last-child { min-width: 0; }
+.export-destination-option strong, .export-destination-option small { display: block; }
+.export-destination-option strong { color: inherit; font-size: .75rem; font-weight: 800; }
+.export-destination-option small { margin-top: .18rem; overflow: hidden; color: #64748b; font-size: .64rem; text-overflow: ellipsis; white-space: nowrap; }
+.export-destination-panel { border: 1px solid #e0e7ff; border-radius: 1rem; background: linear-gradient(135deg, #fbfcff, #f7f7ff); padding: 1rem; }
+.export-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+.export-form-grid label, .export-folder-field { display: grid; align-content: start; gap: .38rem; color: #475569; font-size: .7rem; font-weight: 700; }
+.export-form-grid input, .export-form-grid select { width: 100%; border: 1px solid #cbd5e1; border-radius: .7rem; background: #fff; padding: .65rem .75rem; color: #0f172a; font-size: .76rem; outline: none; }
+.export-form-grid input:focus, .export-form-grid select:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, .1); }
+.export-form-wide { grid-column: 1 / -1; }
+.export-folder-field .template-btn { min-height: 2.45rem; justify-content: center; }
+.export-folder-field small { overflow: hidden; color: #64748b; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.export-submit-btn { width: 100%; justify-content: center; margin-top: .85rem; }
+.export-destination-status { margin-top: .75rem; border: 1px solid #c7d2fe; border-radius: .75rem; background: #eef2ff; color: #4338ca; padding: .7rem .8rem; font-size: .72rem; line-height: 1.5; }
+.export-destination-status[data-tone="success"] { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
+.export-destination-status[data-tone="warning"] { border-color: #fde68a; background: #fffbeb; color: #92400e; }
+.export-destination-status[data-tone="error"] { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+@media (max-width: 760px) {
+  .export-destination-tabs, .export-form-grid { grid-template-columns: 1fr; }
+  .export-form-wide { grid-column: auto; }
+}
