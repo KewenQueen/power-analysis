@@ -1944,3 +1944,44 @@ body.col-resizing {
   .analysis-upload-zone { align-items: flex-start; flex-direction: column; }
   .analysis-file-item { align-items: flex-start; flex-wrap: wrap; }
 }
+
+.analysis-preview-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+}
+.analysis-preview-tabs .ds-tab {
+  flex: 0 0 auto;
+}
+.analysis-preview-panel {
+  margin-top: 0.8rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  background: #fff;
+  padding: 0.9rem;
+}
+.analysis-preview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.analysis-preview-header h3 {
+  color: #0f172a;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+.analysis-preview-header p,
+.analysis-preview-header > span {
+  color: #64748b;
+  font-size: 0.68rem;
+}
+.analysis-preview-header p { margin-top: 0.2rem; }
+#dataExportPreviewPanel .preview-table-wrap { max-height: 520px; }
+
+.analysis-preview-tabs.hidden,
+.analysis-file-list.hidden {
+  display: none;
+}

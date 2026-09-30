@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026092911" />
+    <link rel="stylesheet" href="./style.css?v=2026093012" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -756,34 +756,48 @@
           <article class="panel rounded-3xl p-5 analysis-step-card">
             <div class="analysis-step-heading">
               <span class="analysis-step-number">3</span>
-              <div><h2>数据导出</h2><p>CSV 适配选中模板后生成 Excel；导入 Excel 时此步骤自动跳过。</p></div>
-              <span id="dataExportRunStatus" class="analysis-step-status">等待文件</span>
+              <div><h2>数据对比</h2><p>在线预览已导入文件，展示形式与「拆解数据对比分析」保持一致。</p></div>
+              <span id="dataExportPreviewStatus" class="analysis-step-status">等待文件</span>
             </div>
             <div class="analysis-step-content">
-              <button id="dataExportRunBtn" type="button" class="analysis-primary-btn" disabled>
-                <span class="material-symbols-outlined">output</span> 适配模板并生成 Excel
+              <button id="dataExportPreviewBtn" type="button" class="analysis-primary-btn" disabled>
+                <span class="material-symbols-outlined">preview</span> 生成在线预览
               </button>
-              <div id="dataExportResultActions" class="hidden mt-3">
-                <div class="analysis-success-note"><span class="material-symbols-outlined">check_circle</span>CSV 已完成模板适配，可以下载生成结果。</div>
-                <button id="dataExportDownloadAllBtn" type="button" class="template-btn template-btn-primary analysis-download-all">
-                  <span class="material-symbols-outlined text-sm">download_for_offline</span> 下载全部 CSV 结果
-                </button>
+              <div id="dataExportPreviewTabs" class="hidden analysis-preview-tabs"></div>
+              <div id="dataExportPreviewPanel" class="hidden analysis-preview-panel">
+                <div class="analysis-preview-header">
+                  <div>
+                    <h3>功耗采集数据结果预览</h3>
+                    <p>数值统一保留 2 位小数；数值列等宽；列标题超长可点击查看完整名称。</p>
+                  </div>
+                  <span id="dataExportPreviewMeta">尚未生成</span>
+                </div>
+                <div class="preview-table-wrap mt-3 border border-slate-200 rounded-xl bg-white">
+                  <table class="text-xs processed-table preview-table compact-table numeric-uniform resizable-table">
+                    <thead id="dataExportPreviewHead" class="sticky top-0 bg-indigo-50 text-slate-700"></thead>
+                    <tbody id="dataExportPreviewBody" class="divide-y divide-slate-100"></tbody>
+                  </table>
+                </div>
               </div>
-              <p id="dataExportTip" class="analysis-helper analysis-tip">请先完成模板选择和文件导入。</p>
+              <p id="dataExportPreviewTip" class="analysis-helper analysis-tip">导入文件后，可在此生成并切换在线预览。</p>
             </div>
           </article>
 
-          <article class="panel rounded-3xl p-5 analysis-step-card analysis-step-placeholder">
+          <article class="panel rounded-3xl p-5 analysis-step-card">
             <div class="analysis-step-heading">
               <span class="analysis-step-number">4</span>
-              <div><h2>数据对比</h2><p>CSV 导出完成或 Excel 导入成功后，将在这里进入数据对比。</p></div>
-              <span class="analysis-step-status analysis-step-status-muted">待开发</span>
+              <div><h2>数据导出</h2><p>CSV 在预览时完成模板适配并生成 Excel；导入 Excel 时无需再次导出。</p></div>
+              <span id="dataExportRunStatus" class="analysis-step-status">等待预览</span>
             </div>
             <div class="analysis-step-content">
-              <div class="analysis-coming-soon">
-                <span class="analysis-coming-icon"><span class="material-symbols-outlined">compare_arrows</span></span>
-                <div><h3>数据对比功能建设中</h3><p>后续将支持选择多个文件、配置对比维度并生成差异结果。</p></div>
+              <div id="dataExportResultActions" class="hidden">
+                <div class="analysis-success-note"><span class="material-symbols-outlined">check_circle</span>CSV 已完成模板适配，可以下载生成结果。</div>
+                <div id="dataExportDownloadList" class="analysis-file-list"></div>
+                <button id="dataExportDownloadAllBtn" type="button" class="template-btn template-btn-primary analysis-download-all mt-3">
+                  <span class="material-symbols-outlined text-sm">download_for_offline</span> 下载全部 CSV 结果
+                </button>
               </div>
+              <p id="dataExportTip" class="analysis-helper analysis-tip">请先完成在线预览。</p>
             </div>
           </article>
         </section>
@@ -797,9 +811,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026092911"></script>
-    <script src="./supabase-auth.js?v=2026092911"></script>
-    <script src="./app.js?v=2026092911"></script>
+    <script src="./config.js?v=2026093012"></script>
+    <script src="./supabase-auth.js?v=2026093012"></script>
+    <script src="./app.js?v=2026093012"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
