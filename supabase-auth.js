@@ -135,7 +135,16 @@
         setMessage('登录成功。', 'success');
       }
     } catch (error) {
-      setMessage(error && error.message ? error.message : '操作失败，请稍后重试。', 'error');
+      const msg = (error && error.message) ? String(error.message) : '';
+      if (msg === 'Failed to fetch' || /network/i.test(msg) || /fetch/i.test(msg) || /timeout/i.test(msg)) {
+        setMessage('无法连接服务器。可能原因：① Supabase 免费项目因长期未使用被暂停，请前往 supabase.com/dashboard 恢复；② 网络代理或防火墙限制。', 'error');
+      } else if (/invalid.*credentials|invalid.*login|wrong.*password|user.*not.*found/i.test(msg)) {
+        setMessage('账号或密码错误，请检查后重试。', 'error');
+      } else if (/email.*not.*confirmed|email.*not.*verified/i.test(msg)) {
+        setMessage('邮箱尚未验证，请前往注册邮箱点击验证链接后再登录。', 'error');
+      } else {
+        setMessage(msg || '操作失败，请稍后重试。', 'error');
+      }
     } finally {
       submitBtn.disabled = false;
       submitBtn.textContent = mode === 'signup' ? '注册账号' : '登录';
