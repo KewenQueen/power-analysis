@@ -33,26 +33,7 @@
         <div class="auth-brand-mark"><span class="material-symbols-outlined">bolt</span></div>
         <p class="auth-eyebrow">POWER WORKSPACE</p>
         <h1>功耗拆解工作台</h1>
-        <p class="auth-subtitle">普通成员可使用邮箱账号登录，也可以游客身份体验；管理员入口位于页面底部。</p>
-        <div class="auth-divider"><span>普通账号</span></div>
-        <div class="auth-tabs" role="tablist" aria-label="账号操作">
-          <button id="authLoginTab" type="button" class="auth-tab active">登录</button>
-          <button id="authSignupTab" type="button" class="auth-tab">注册</button>
-        </div>
-        <label class="auth-field">
-          <span>邮箱</span>
-          <input id="authEmail" type="email" autocomplete="email" placeholder="name@example.com" />
-        </label>
-        <div class="auth-field">
-          <label for="authPassword">密码</label>
-          <div class="auth-password-wrap">
-            <input id="authPassword" type="password" autocomplete="current-password" placeholder="至少 6 位密码" />
-            <button id="passwordToggleBtn" type="button" class="auth-password-toggle" aria-label="显示密码" aria-pressed="false">显示</button>
-          </div>
-        </div>
-        <div id="authMessage" class="auth-message hidden" role="status"></div>
-        <button id="authSubmitBtn" type="button" class="auth-submit">登录</button>
-        <div class="auth-divider"><span>或</span></div>
+        <p class="auth-subtitle">游客可直接进入体验，普通成员可在页面底部使用邮箱登录；管理员入口见下方。</p>
         <button id="guestModeBtn" type="button" class="auth-guest" onclick="window.powerAuth && window.powerAuth.enterGuestMode()">
           <span class="material-symbols-outlined">person_outline</span>
           游客模式使用
@@ -77,6 +58,24 @@
           <button id="githubLoginBtn" type="button" class="auth-admin-option auth-admin-option-github">GitHub 账号登录</button>
           <p class="auth-oauth-note">独立管理员密码仅用于本网站管理员模式，不需要邮箱；GitHub 密码仅在 GitHub 官方页面验证。</p>
         </div>
+        <div class="auth-divider"><span>普通账号</span></div>
+        <div class="auth-tabs" role="tablist" aria-label="账号操作">
+          <button id="authLoginTab" type="button" class="auth-tab active">登录</button>
+          <button id="authSignupTab" type="button" class="auth-tab">注册</button>
+        </div>
+        <label class="auth-field">
+          <span>邮箱</span>
+          <input id="authEmail" type="email" autocomplete="email" placeholder="name@example.com" />
+        </label>
+        <div class="auth-field">
+          <label for="authPassword">密码</label>
+          <div class="auth-password-wrap">
+            <input id="authPassword" type="password" autocomplete="current-password" placeholder="至少 6 位密码" />
+            <button id="passwordToggleBtn" type="button" class="auth-password-toggle" aria-label="显示密码" aria-pressed="false">显示</button>
+          </div>
+        </div>
+        <div id="authMessage" class="auth-message hidden" role="status"></div>
+        <button id="authSubmitBtn" type="button" class="auth-submit">登录</button>
         <p class="auth-footnote"><span class="material-symbols-outlined">lock</span> 独立管理员密码仅保留当前浏览器会话状态</p>
       </div>
     </section>
