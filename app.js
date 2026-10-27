@@ -2645,20 +2645,55 @@ function handleDatasetProjectChange(dsId, projectId) {
 }
 
 // ---------- Feature page navigation ----------
-async function openFeaturePage(targetId) {
+// 二级入口（如「功耗拆解分析」下的子功能）导航栈：返回时先回上一级，栈空才回主页。
+const featureNavStack = [];
+
+function getVisibleFeaturePageId() {
+  const visible = document.querySelector('.feature-page:not(.hidden)');
+  return visible ? visible.id : null;
+}
+
+function updateFeatureBackLabels() {
+  const visible = document.querySelector('.feature-page:not(.hidden)');
+  const backBtn = visible ? visible.querySelector('[data-feature-back]') : null;
+  if (!backBtn) return;
+  const icon = backBtn.querySelector('.material-symbols-outlined');
+  const label = featureNavStack.length ? '返回上一级' : '返回主页面';
+  backBtn.textContent = '';
+  if (icon) backBtn.appendChild(icon);
+  backBtn.appendChild(document.createTextNode(' ' + label));
+}
+
+function showFeaturePage(targetId) {
   const target = document.getElementById(targetId);
-  if (!target || !target.classList.contains('feature-page')) return;
+  if (!target || !target.classList.contains('feature-page')) return false;
   document.querySelectorAll('.feature-page').forEach((page) => page.classList.add('hidden'));
   document.body.classList.add('feature-page-mode');
   target.classList.remove('hidden');
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (targetId === 'projectTemplatePage') switchTemplateView('list');
+  return true;
+}
+
+async function openFeaturePage(targetId) {
+  const target = document.getElementById(targetId);
+  if (!target || !target.classList.contains('feature-page')) return;
+  const currentId = getVisibleFeaturePageId();
+  if (currentId && currentId !== targetId) featureNavStack.push(currentId);
+  showFeaturePage(targetId);
+  updateFeatureBackLabels();
 }
 
 function closeFeaturePage() {
+  // 有上一级页面时，先返回上一级
+  while (featureNavStack.length) {
+    const prevId = featureNavStack.pop();
+    if (showFeaturePage(prevId)) { updateFeatureBackLabels(); return; }
+  }
   document.body.classList.remove('feature-page-mode');
   document.querySelectorAll('.feature-page').forEach((page) => page.classList.add('hidden'));
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  updateFeatureBackLabels();
 }
 
 // ---------- Data breakdown template builder ----------

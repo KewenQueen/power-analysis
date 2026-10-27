@@ -466,7 +466,7 @@ body.feature-page-mode #appShell main > :not(#appTopBar):not(.feature-page) {
 
 .feature-entry-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
 }
 
@@ -513,9 +513,11 @@ body.feature-page-mode #appShell main > :not(#appTopBar):not(.feature-page) {
 .feature-entry-emerald .feature-entry-icon { color: #047857; background: #d1fae5; }
 .feature-entry-amber .feature-entry-icon { color: #b45309; background: #fef3c7; }
 .feature-entry-violet .feature-entry-icon { color: #6d28d9; background: #ede9fe; }
+.feature-entry-indigo .feature-entry-icon { color: #4338ca; background: #e0e7ff; }
 .feature-entry-rose .feature-entry-icon { color: #be123c; background: #ffe4e6; }
 .feature-entry-slate .feature-entry-icon { color: #334155; background: #e2e8f0; }
 .feature-entry-violet:hover { border-color: #c4b5fd; }
+.feature-entry-indigo:hover { border-color: #a5b4fc; }
 .feature-entry-rose:hover { border-color: #fda4af; }
 .feature-entry-slate:hover { border-color: #cbd5e1; }
 .feature-dev-badge {
@@ -2793,4 +2795,27 @@ body.is-admin .dpdb-admin-action { display: inline-flex !important; }
 @media (max-width: 900px) {
   .dpdb-layout { grid-template-columns: 1fr; }
   .dpdb-menu { max-height: 260px; }
+}
+
+/* ============================================================
+   功耗拆解分析 — 二级功能列表
+   ============================================================ */
+.sub-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.1rem 0.2rem 0.7rem;
+  border-bottom: 1px solid #f1f5f9;
+  margin-bottom: 0.7rem;
+}
+.sub-entry-head .material-symbols-outlined { font-size: 1.15rem; color: #6366f1; }
+.sub-entry-head h3 { color: #0f172a; font-size: 0.86rem; font-weight: 800; }
+.sub-entry-head p { margin-top: 0.15rem; color: #64748b; font-size: 0.7rem; }
+
+.sub-entry-list { display: grid; gap: 0.7rem; }
+.sub-entry-list .feature-entry-card { min-height: 96px; }
+.sub-entry-list .feature-entry-card .feature-entry-content strong { font-size: 1rem; }
+
+@media (max-width: 900px) {
+  .sub-entry-list .feature-entry-card { min-height: 104px; }
 }

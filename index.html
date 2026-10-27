@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026100123" />
+    <link rel="stylesheet" href="./style.css?v=2026100124" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -210,32 +210,8 @@
         </div>
       </section>
 
-      <!-- 三个功能入口 -->
+      <!-- 主页功能入口 -->
       <section id="homeFeatureGrid" class="feature-entry-grid mt-6">
-        <button type="button" class="feature-entry-card feature-entry-blue" data-feature-target="projectTemplatePage">
-          <span class="feature-entry-icon"><span class="material-symbols-outlined">folder_managed</span></span>
-          <span class="feature-entry-content">
-            <strong>项目模板管理</strong>
-            <small>管理模板库，或在线编辑并生成新的 Excel 模板</small>
-          </span>
-          <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
-        </button>
-        <button type="button" class="feature-entry-card feature-entry-emerald" data-feature-target="comparisonAnalysisPage">
-          <span class="feature-entry-icon"><span class="material-symbols-outlined">query_stats</span></span>
-          <span class="feature-entry-content">
-            <strong>拆解数据对比分析</strong>
-            <small>导入 CSV、生成结果并完成多项目对比</small>
-          </span>
-          <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
-        </button>
-        <button type="button" class="feature-entry-card feature-entry-amber" data-feature-target="dataExportPage">
-          <span class="feature-entry-icon"><span class="material-symbols-outlined">file_export</span></span>
-          <span class="feature-entry-content">
-            <strong>拆解数据导出</strong>
-            <small>选择模板，导入 CSV / Excel 并按需导出</small>
-          </span>
-          <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
-        </button>
         <button type="button" class="feature-entry-card feature-entry-violet" data-feature-target="devicePowerDbPage">
           <span class="feature-entry-icon"><span class="material-symbols-outlined">database</span></span>
           <span class="feature-entry-content">
@@ -252,6 +228,14 @@
           </span>
           <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
         </button>
+        <button type="button" class="feature-entry-card feature-entry-indigo" data-feature-target="powerBreakdownPage">
+          <span class="feature-entry-icon"><span class="material-symbols-outlined">insights</span></span>
+          <span class="feature-entry-content">
+            <strong>功耗拆解分析</strong>
+            <small>模板管理、拆解数据对比分析与导出，统一入口进入</small>
+          </span>
+          <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
+        </button>
         <button type="button" class="feature-entry-card feature-entry-slate" data-feature-target="enduranceStatusPage">
           <span class="feature-entry-icon"><span class="material-symbols-outlined">monitoring</span></span>
           <span class="feature-entry-content">
@@ -260,6 +244,55 @@
           </span>
           <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
         </button>
+      </section>
+
+      <!-- 功耗拆解分析（二级入口聚合页） -->
+      <section id="powerBreakdownPage" class="hidden feature-page">
+        <div class="feature-page-header">
+          <button type="button" class="template-btn template-btn-secondary" data-feature-back>
+            <span class="material-symbols-outlined text-sm">arrow_back</span> 返回主页面
+          </button>
+          <div>
+            <h2>功耗拆解分析</h2>
+            <p>功耗拆解相关能力统一在此进入，选择一个子功能继续操作。</p>
+          </div>
+        </div>
+
+        <div class="panel panel-compact rounded-3xl p-4">
+          <div class="sub-entry-head">
+            <span class="material-symbols-outlined">apps</span>
+            <div>
+              <h3>请选择子功能</h3>
+              <p>按「建模板 → 做对比 → 导结果」的顺序使用。</p>
+            </div>
+          </div>
+          <div class="sub-entry-list">
+            <button type="button" class="feature-entry-card feature-entry-blue" data-feature-target="projectTemplatePage">
+              <span class="feature-entry-icon"><span class="material-symbols-outlined">folder_managed</span></span>
+              <span class="feature-entry-content">
+                <strong>项目模板管理</strong>
+                <small>管理模板库，或在线编辑采样通道并生成新的 Excel 模板</small>
+              </span>
+              <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
+            </button>
+            <button type="button" class="feature-entry-card feature-entry-emerald" data-feature-target="comparisonAnalysisPage">
+              <span class="feature-entry-icon"><span class="material-symbols-outlined">query_stats</span></span>
+              <span class="feature-entry-content">
+                <strong>拆解数据对比分析</strong>
+                <small>导入 CSV / Excel，生成处理结果并完成多项目对比</small>
+              </span>
+              <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
+            </button>
+            <button type="button" class="feature-entry-card feature-entry-amber" data-feature-target="dataExportPage">
+              <span class="feature-entry-icon"><span class="material-symbols-outlined">file_export</span></span>
+              <span class="feature-entry-content">
+                <strong>拆解数据导出</strong>
+                <small>选择模板，导入数据并按需导出 Excel 或云文档</small>
+              </span>
+              <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
+            </button>
+          </div>
+        </div>
       </section>
 
       <!-- 项目模板管理二级页面 -->
@@ -1067,9 +1100,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026100123"></script>
-    <script src="./supabase-auth.js?v=2026100123"></script>
-    <script src="./app.js?v=2026100123"></script>
+    <script src="./config.js?v=2026100124"></script>
+    <script src="./supabase-auth.js?v=2026100124"></script>
+    <script src="./app.js?v=2026100124"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
