@@ -241,7 +241,17 @@ function clearTransientCaches() {
   try {
     const HISTORY_KEY = 'qepm_operation_history';
     const DEFAULT_COLUMNS_KEY = 'qepm_default_columns';
-    const keepKeys = new Set([HISTORY_KEY, DEFAULT_COLUMNS_KEY]);
+    // 这些是用户数据（草稿 / 自定义配置 / 器件功耗库），必须跨刷新保留，
+    // 不能被“清理临时缓存”误删。
+    const keepKeys = new Set([
+      HISTORY_KEY,
+      DEFAULT_COLUMNS_KEY,
+      'sampling_channel_online_draft_v1',
+      'sampling_channel_rules_v1',
+      'sampling_channel_columns_v1',
+      'device_power_db_menu_v1',
+      'device_power_db_data_v1',
+    ]);
     const keepValues = {};
     keepKeys.forEach((key) => {
       const value = localStorage.getItem(key);
@@ -518,6 +528,13 @@ const els = {
   templateBuilderDisclosure: document.getElementById('templateBuilderDisclosure'),
   samplingChannelLocalFile: document.getElementById('samplingChannelLocalFile'),
   samplingChannelLocalFileName: document.getElementById('samplingChannelLocalFileName'),
+  // Device power database
+  dpdbMenu: document.getElementById('dpdbMenu'),
+  dpdbAddCategoryBtn: document.getElementById('dpdbAddCategoryBtn'),
+  dpdbUploadBtn: document.getElementById('dpdbUploadBtn'),
+  dpdbFileInput: document.getElementById('dpdbFileInput'),
+  dpdbContentTitle: document.getElementById('dpdbContentTitle'),
+  dpdbContentMeta: document.getElementById('dpdbContentMeta'),
   samplingChannelOnlineToggle: document.getElementById('samplingChannelOnlineToggle'),
   samplingChannelOnlineForm: document.getElementById('samplingChannelOnlineForm'),
   samplingChannelOnlineAddRow: document.getElementById('samplingChannelOnlineAddRow'),
@@ -6586,6 +6603,445 @@ function bindEvents() {
     if (colModalAdd) colModalAdd.addEventListener('click', handleAddColumn);
     if (colList) colList.addEventListener('click', handleColumnListClick);
   }
+  // ---------- 器件功耗数据库 ----------
+  if (els.dpdbMenu) {
+    const DPDB_MENU_KEY = 'device_power_db_menu_v1';
+    const DPDB_DATA_KEY = 'device_power_db_data_v1';
+    const DPDB_PREVIEW_MAX_ROWS = 500;
+
+    const DPDB_DEFAULT_MENU = [
+      { id: 'platform', name: 'Platform', children: [
+        { id: 'platform-soc', name: 'SOC' },
+        { id: 'platform-pmic', name: 'PMIC' },
+        { id: 'platform-ddr', name: 'DDR' },
+        { id: 'platform-emmc', name: 'EMMC' },
+      ] },
+      { id: 'display', name: 'Display', children: [
+        { id: 'display-oled', name: 'OLED' },
+        { id: 'display-microoled', name: 'MicroOLED' },
+      ] },
+      { id: 'camera', name: 'Camera', children: [
+        { id: 'camera-sensor', name: 'Sensor' },
+        { id: 'camera-ois', name: 'OIS' },
+        { id: 'camera-af', name: 'AF' },
+      ] },
+      { id: 'audio', name: 'Audio', children: [
+        { id: 'audio-smartpa', name: 'SmartPA' },
+        { id: 'audio-mic', name: 'MIC' },
+      ] },
+      { id: 'rf', name: 'RF', children: [
+        { id: 'rf-sdr', name: 'SDR' },
+        { id: 'rf-pa', name: 'PA' },
+        { id: 'rf-lna', name: 'LNA' },
+      ] },
+      { id: 'wifi', name: 'WIFI', children: [
+        { id: 'wifi-wcn', name: 'WCN' },
+        { id: 'wifi-fem', name: 'FEM' },
+      ] },
+      { id: 'sensor', name: 'Sensor', children: [
+        { id: 'sensor-als', name: 'ALS' },
+        { id: 'sensor-imu', name: 'IMU' },
+        { id: 'sensor-led', name: 'LED' },
+        { id: 'sensor-mag', name: 'MAG' },
+        { id: 'sensor-touch', name: 'Touch' },
+        { id: 'sensor-hall', name: 'Hall' },
+      ] },
+    ];
+
+    let dpdbMenu = null;      // [{ id, name, children: [{ id, name }] }]
+    let dpdbData = null;      // { [nodeId]: { headers: [], rows: [], fileName, updatedAt } }
+    let dpdbActiveId = null;  // selected level-2 node id
+    let dpdbCollapsed = {};   // { [level1Id]: true }
+
+    function dpdbClone(obj) { return JSON.parse(JSON.stringify(obj)); }
+
+    function dpdbLoadMenu() {
+      try {
+        const raw = localStorage.getItem(DPDB_MENU_KEY);
+        const arr = raw ? JSON.parse(raw) : null;
+        if (Array.isArray(arr) && arr.length) { dpdbMenu = arr; return; }
+      } catch { /* ignore */ }
+      dpdbMenu = dpdbClone(DPDB_DEFAULT_MENU);
+    }
+
+    function dpdbSaveMenu() {
+      try { localStorage.setItem(DPDB_MENU_KEY, JSON.stringify(dpdbMenu)); } catch { /* ignore */ }
+    }
+
+    function dpdbLoadData() {
+      try {
+        const raw = localStorage.getItem(DPDB_DATA_KEY);
+        const obj = raw ? JSON.parse(raw) : null;
+        dpdbData = (obj && typeof obj === 'object') ? obj : {};
+      } catch { dpdbData = {}; }
+    }
+
+    function dpdbSaveData() {
+      try {
+        localStorage.setItem(DPDB_DATA_KEY, JSON.stringify(dpdbData));
+      } catch (err) {
+        console.warn('器件功耗数据库保存失败（可能超出浏览器存储上限）：', err);
+        alert('本地数据保存失败，可能是单次上传的数据过大已超出浏览器存储上限。请尝试精简表格后重试。');
+      }
+    }
+
+    function dpdbFindNode(id) {
+      for (const group of dpdbMenu) {
+        if (group.id === id) return { level: 1, group };
+        const child = (group.children || []).find((c) => c.id === id);
+        if (child) return { level: 2, group, child };
+      }
+      return null;
+    }
+
+    function dpdbMakeId(prefix) {
+      return prefix + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+    }
+
+    function dpdbRequireAdmin() {
+      if (!state.isAdmin) { alert('只有管理员可以修改器件功耗数据库。'); return false; }
+      return true;
+    }
+
+    function dpdbRenderMenu() {
+      const container = els.dpdbMenu;
+      container.innerHTML = '';
+      if (!dpdbMenu.length) {
+        const empty = document.createElement('p');
+        empty.className = 'dpdb-hint';
+        empty.textContent = '暂无分类，请管理员新建一级分类。';
+        container.appendChild(empty);
+        return;
+      }
+
+      dpdbMenu.forEach((group) => {
+        const groupEl = document.createElement('div');
+        groupEl.className = 'dpdb-group';
+        groupEl.dataset.groupId = group.id;
+        const isCollapsed = Boolean(dpdbCollapsed[group.id]);
+
+        const head = document.createElement('div');
+        head.className = 'dpdb-group-head';
+        head.innerHTML = ''
+          + '<button type="button" class="dpdb-group-toggle" data-action="dpdb-toggle-group" data-id="' + escapeHtml(group.id) + '">'
+          + '<span class="material-symbols-outlined dpdb-caret' + (isCollapsed ? ' is-collapsed' : '') + '">expand_more</span>'
+          + '<span class="dpdb-group-name">' + escapeHtml(group.name) + '</span>'
+          + '<span class="dpdb-group-count">' + (group.children || []).length + '</span>'
+          + '</button>'
+          + '<span class="dpdb-group-tools">'
+          + '<button type="button" class="dpdb-icon-btn" data-action="dpdb-add-child" data-id="' + escapeHtml(group.id) + '" title="新建二级分类"><span class="material-symbols-outlined">add</span></button>'
+          + '<button type="button" class="dpdb-icon-btn" data-action="dpdb-rename-group" data-id="' + escapeHtml(group.id) + '" title="重命名一级分类"><span class="material-symbols-outlined">edit</span></button>'
+          + '<button type="button" class="dpdb-icon-btn dpdb-icon-danger" data-action="dpdb-delete-group" data-id="' + escapeHtml(group.id) + '" title="删除一级分类"><span class="material-symbols-outlined">delete</span></button>'
+          + '</span>';
+        groupEl.appendChild(head);
+
+        const childWrap = document.createElement('div');
+        childWrap.className = 'dpdb-children' + (isCollapsed ? ' hidden' : '');
+        if (!(group.children || []).length) {
+          const none = document.createElement('p');
+          none.className = 'dpdb-child-empty';
+          none.textContent = '暂无二级分类';
+          childWrap.appendChild(none);
+        }
+        (group.children || []).forEach((child) => {
+          const item = document.createElement('div');
+          item.className = 'dpdb-child' + (dpdbActiveId === child.id ? ' is-active' : '');
+          item.dataset.childId = child.id;
+          const hasData = Boolean(dpdbData[child.id] && (dpdbData[child.id].rows || []).length);
+          item.innerHTML = ''
+            + '<button type="button" class="dpdb-child-btn" data-action="dpdb-select-child" data-id="' + escapeHtml(child.id) + '">'
+            + '<span class="material-symbols-outlined dpdb-child-icon">' + (hasData ? 'check_circle' : 'chevron_right') + '</span>'
+            + '<span class="dpdb-child-name">' + escapeHtml(child.name) + '</span>'
+            + '</button>'
+            + '<span class="dpdb-group-tools">'
+            + '<button type="button" class="dpdb-icon-btn" data-action="dpdb-rename-child" data-id="' + escapeHtml(child.id) + '" title="重命名二级分类"><span class="material-symbols-outlined">edit</span></button>'
+            + '<button type="button" class="dpdb-icon-btn dpdb-icon-danger" data-action="dpdb-delete-child" data-id="' + escapeHtml(child.id) + '" title="删除二级分类"><span class="material-symbols-outlined">delete</span></button>'
+            + '</span>';
+          childWrap.appendChild(item);
+        });
+        groupEl.appendChild(childWrap);
+        container.appendChild(groupEl);
+      });
+    }
+
+    function dpdbRenderContent() {
+      const titleEl = els.dpdbContentTitle;
+      const metaEl = els.dpdbContentMeta;
+      const emptyEl = document.getElementById('dpdbEmptyState');
+      const wrapEl = document.getElementById('dpdbPreviewWrap');
+      const headEl = document.getElementById('dpdbPreviewHead');
+      const bodyEl = document.getElementById('dpdbPreviewBody');
+      const footEl = document.getElementById('dpdbPreviewFoot');
+      const uploadLabel = document.getElementById('dpdbUploadBtnLabel');
+      const clearBtn = document.getElementById('dpdbClearDataBtn');
+
+      if (!dpdbActiveId) {
+        titleEl.textContent = '请选择器件分类';
+        metaEl.textContent = '从左侧选择二级分类查看已上传的功耗数据。';
+        emptyEl.classList.remove('hidden');
+        wrapEl.classList.add('hidden');
+        if (uploadLabel) uploadLabel.textContent = '上传数据';
+        if (clearBtn) clearBtn.disabled = true;
+        return;
+      }
+
+      const found = dpdbFindNode(dpdbActiveId);
+      if (!found || found.level !== 2) {
+        dpdbActiveId = null;
+        dpdbRenderContent();
+        return;
+      }
+
+      const groupName = found.group.name;
+      const childName = found.child.name;
+      titleEl.textContent = groupName + ' / ' + childName;
+
+      const record = dpdbData[dpdbActiveId];
+      const rows = record && Array.isArray(record.rows) ? record.rows : [];
+      const headers = record && Array.isArray(record.headers) ? record.headers : [];
+      if (uploadLabel) uploadLabel.textContent = rows.length ? '重新上传覆盖' : '上传数据';
+      if (clearBtn) clearBtn.disabled = !rows.length;
+
+      if (!rows.length) {
+        metaEl.textContent = '该分类下暂无数据。管理员可上传 .xlsx / .csv 文件。';
+        emptyEl.classList.remove('hidden');
+        wrapEl.classList.add('hidden');
+        return;
+      }
+
+      const updated = record.updatedAt ? new Date(record.updatedAt) : null;
+      metaEl.textContent = '数据来源：' + (record.fileName || '未知文件')
+        + (updated ? '｜更新于 ' + updated.toLocaleString() : '')
+        + '｜共 ' + rows.length + ' 行 × ' + headers.length + ' 列';
+
+      emptyEl.classList.add('hidden');
+      wrapEl.classList.remove('hidden');
+
+      headEl.innerHTML = '<tr>' + headers.map((h) => '<th>' + escapeHtml(h === '' ? '' : String(h)) + '</th>').join('') + '</tr>';
+      const shown = rows.slice(0, DPDB_PREVIEW_MAX_ROWS);
+      bodyEl.innerHTML = shown.map((row) => '<tr>' + headers.map((_, i) => {
+        const v = row[i];
+        return '<td>' + escapeHtml(v === undefined || v === null ? '' : String(v)) + '</td>';
+      }).join('') + '</tr>').join('');
+      if (footEl) {
+        footEl.textContent = rows.length > shown.length
+          ? ('仅预览前 ' + shown.length + ' 行，共 ' + rows.length + ' 行。完整数据已保存在本地。')
+          : ('共 ' + rows.length + ' 行数据，已全部展示。');
+      }
+    }
+
+    function dpdbRerender() {
+      dpdbRenderMenu();
+      dpdbRenderContent();
+    }
+
+    function dpdbNormalizeGrid(matrix) {
+      const cleaned = matrix
+        .map((row) => (Array.isArray(row) ? row.map((v) => (v === undefined || v === null ? '' : v)) : []))
+        .filter((row) => row.some((v) => String(v).trim() !== ''));
+      if (!cleaned.length) return { headers: [], rows: [] };
+      const width = cleaned.reduce((max, row) => Math.max(max, row.length), 0);
+      const padded = cleaned.map((row) => {
+        const next = row.slice();
+        while (next.length < width) next.push('');
+        return next;
+      });
+      const headers = padded[0].map((v, i) => (String(v).trim() !== '' ? String(v).trim() : '列' + (i + 1)));
+      return { headers, rows: padded.slice(1) };
+    }
+
+    async function dpdbParseFile(file) {
+      const name = (file.name || '').toLowerCase();
+      if (name.endsWith('.csv')) {
+        const text = await file.text();
+        const parsed = Papa.parse(text.replace(/^\uFEFF/, ''), { skipEmptyLines: 'greedy' });
+        return dpdbNormalizeGrid(parsed.data || []);
+      }
+      if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+        const buffer = await file.arrayBuffer();
+        const workbook = await XlsxPopulate.fromDataAsync(buffer);
+        const sheet = workbook.sheet(0);
+        const used = sheet && sheet.usedRange();
+        const values = used ? used.value() : [];
+        return dpdbNormalizeGrid(values || []);
+      }
+      throw new Error('仅支持 .xlsx / .xls / .csv 文件');
+    }
+
+    async function dpdbHandleFile(file) {
+      if (!file || !dpdbActiveId) return;
+      if (!dpdbRequireAdmin()) return;
+      const found = dpdbFindNode(dpdbActiveId);
+      if (!found || found.level !== 2) return;
+      try {
+        const parsed = await dpdbParseFile(file);
+        if (!parsed.rows.length) {
+          alert('文件解析结果为空，请检查文件内容（需要第一行是表头）。');
+          return;
+        }
+        dpdbData[dpdbActiveId] = {
+          headers: parsed.headers,
+          rows: parsed.rows,
+          fileName: file.name,
+          updatedAt: new Date().toISOString(),
+        };
+        dpdbSaveData();
+        dpdbRerender();
+      } catch (err) {
+        console.error(err);
+        alert('文件解析失败：' + (err && err.message ? err.message : '未知错误'));
+      }
+    }
+
+    function dpdbSelectChild(id) {
+      dpdbActiveId = id;
+      const found = dpdbFindNode(id);
+      if (found && found.level === 2) dpdbCollapsed[found.group.id] = false;
+      dpdbRerender();
+    }
+
+    function dpdbAddGroup() {
+      if (!dpdbRequireAdmin()) return;
+      const name = window.prompt('请输入一级分类名称：', '新分类');
+      if (name === null) return;
+      const trimmed = name.trim();
+      if (!trimmed) { alert('分类名称不能为空。'); return; }
+      dpdbMenu.push({ id: dpdbMakeId('grp'), name: trimmed, children: [] });
+      dpdbSaveMenu();
+      dpdbRerender();
+    }
+
+    function dpdbAddChild(groupId) {
+      if (!dpdbRequireAdmin()) return;
+      const group = dpdbMenu.find((g) => g.id === groupId);
+      if (!group) return;
+      const name = window.prompt('请输入二级分类名称（' + group.name + ' 下）：', '新器件');
+      if (name === null) return;
+      const trimmed = name.trim();
+      if (!trimmed) { alert('分类名称不能为空。'); return; }
+      group.children = group.children || [];
+      group.children.push({ id: dpdbMakeId('dev'), name: trimmed });
+      dpdbCollapsed[groupId] = false;
+      dpdbSaveMenu();
+      dpdbRerender();
+    }
+
+    function dpdbRenameGroup(groupId) {
+      if (!dpdbRequireAdmin()) return;
+      const group = dpdbMenu.find((g) => g.id === groupId);
+      if (!group) return;
+      const name = window.prompt('重命名一级分类：', group.name);
+      if (name === null) return;
+      const trimmed = name.trim();
+      if (!trimmed) { alert('分类名称不能为空。'); return; }
+      group.name = trimmed;
+      dpdbSaveMenu();
+      dpdbRerender();
+    }
+
+    function dpdbRenameChild(childId) {
+      if (!dpdbRequireAdmin()) return;
+      const found = dpdbFindNode(childId);
+      if (!found || found.level !== 2) return;
+      const name = window.prompt('重命名二级分类：', found.child.name);
+      if (name === null) return;
+      const trimmed = name.trim();
+      if (!trimmed) { alert('分类名称不能为空。'); return; }
+      found.child.name = trimmed;
+      dpdbSaveMenu();
+      dpdbRerender();
+    }
+
+    function dpdbDeleteGroup(groupId) {
+      if (!dpdbRequireAdmin()) return;
+      const group = dpdbMenu.find((g) => g.id === groupId);
+      if (!group) return;
+      const childIds = (group.children || []).map((c) => c.id);
+      const msg = '确认删除一级分类「' + group.name + '」及其下 ' + childIds.length + ' 个二级分类？'
+        + (childIds.length ? '\n其下已上传的数据也会一并删除，且无法恢复。' : '');
+      if (!window.confirm(msg)) return;
+      dpdbMenu = dpdbMenu.filter((g) => g.id !== groupId);
+      childIds.forEach((id) => { delete dpdbData[id]; });
+      if (childIds.includes(dpdbActiveId)) dpdbActiveId = null;
+      dpdbSaveMenu();
+      dpdbSaveData();
+      dpdbRerender();
+    }
+
+    function dpdbDeleteChild(childId) {
+      if (!dpdbRequireAdmin()) return;
+      const found = dpdbFindNode(childId);
+      if (!found || found.level !== 2) return;
+      const hasData = Boolean(dpdbData[childId]);
+      const msg = '确认删除二级分类「' + found.group.name + ' / ' + found.child.name + '」？'
+        + (hasData ? '\n该分类下已上传的数据也会删除，且无法恢复。' : '');
+      if (!window.confirm(msg)) return;
+      found.group.children = (found.group.children || []).filter((c) => c.id !== childId);
+      delete dpdbData[childId];
+      if (dpdbActiveId === childId) dpdbActiveId = null;
+      dpdbSaveMenu();
+      dpdbSaveData();
+      dpdbRerender();
+    }
+
+    dpdbLoadMenu();
+    dpdbLoadData();
+
+    els.dpdbMenu.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-action]');
+      if (!btn) return;
+      const action = btn.dataset.action;
+      const id = btn.dataset.id;
+      if (action === 'dpdb-toggle-group') {
+        dpdbCollapsed[id] = !dpdbCollapsed[id];
+        dpdbRenderMenu();
+      } else if (action === 'dpdb-select-child') {
+        dpdbSelectChild(id);
+      } else if (action === 'dpdb-add-child') {
+        dpdbAddChild(id);
+      } else if (action === 'dpdb-rename-group') {
+        dpdbRenameGroup(id);
+      } else if (action === 'dpdb-delete-group') {
+        dpdbDeleteGroup(id);
+      } else if (action === 'dpdb-rename-child') {
+        dpdbRenameChild(id);
+      } else if (action === 'dpdb-delete-child') {
+        dpdbDeleteChild(id);
+      }
+    });
+
+    if (els.dpdbAddCategoryBtn) els.dpdbAddCategoryBtn.addEventListener('click', dpdbAddGroup);
+
+    if (els.dpdbUploadBtn && els.dpdbFileInput) {
+      els.dpdbUploadBtn.addEventListener('click', () => {
+        if (!dpdbRequireAdmin()) return;
+        if (!dpdbActiveId) { alert('请先在左侧选择一个二级分类。'); return; }
+        els.dpdbFileInput.value = '';
+        els.dpdbFileInput.click();
+      });
+      els.dpdbFileInput.addEventListener('change', () => {
+        const file = els.dpdbFileInput.files && els.dpdbFileInput.files[0];
+        if (file) dpdbHandleFile(file);
+      });
+    }
+
+    const dpdbClearBtn = document.getElementById('dpdbClearDataBtn');
+    if (dpdbClearBtn) {
+      dpdbClearBtn.addEventListener('click', () => {
+        if (!dpdbRequireAdmin()) return;
+        if (!dpdbActiveId) return;
+        const found = dpdbFindNode(dpdbActiveId);
+        const label = found && found.level === 2 ? (found.group.name + ' / ' + found.child.name) : '该分类';
+        if (!window.confirm('确认清空「' + label + '」下已上传的功耗数据？此操作无法恢复。')) return;
+        delete dpdbData[dpdbActiveId];
+        dpdbSaveData();
+        dpdbRerender();
+      });
+    }
+
+    dpdbRerender();
+  }
+
   if (els.templateBuilderProjectName) {
     els.templateBuilderProjectName.addEventListener('input', (event) => {
       state.templateBuilder.projectName = event.target.value;

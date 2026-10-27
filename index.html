@@ -7,9 +7,9 @@
     <meta http-equiv="Cache-Control" content="no-store" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <title>功耗拆解工作台</title>
+    <title>功耗续航工作台</title>
     <meta name="theme-color" content="#6366f1" />
-    <meta name="application-name" content="功耗拆解工作台" />
+    <meta name="application-name" content="功耗续航工作台" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="功耗分析" />
@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026100122" />
+    <link rel="stylesheet" href="./style.css?v=2026100123" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -32,7 +32,7 @@
       <div class="auth-card">
         <div class="auth-brand-mark"><span class="material-symbols-outlined">bolt</span></div>
         <p class="auth-eyebrow">POWER WORKSPACE</p>
-        <h1>功耗拆解工作台</h1>
+        <h1>功耗续航工作台</h1>
         <p class="auth-subtitle">游客可直接进入体验，普通成员可在页面底部使用邮箱登录；管理员入口见下方。</p>
         <button id="guestModeBtn" type="button" class="auth-guest" onclick="window.powerAuth && window.powerAuth.enterGuestMode()">
           <span class="material-symbols-outlined">person_outline</span>
@@ -104,7 +104,7 @@
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative">
       <!-- Top bar with account status -->
       <div id="appTopBar" class="flex items-center justify-between mb-4">
-        <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 leading-tight">功耗拆解工作台</h1>
+        <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 leading-tight">功耗续航工作台</h1>
         <div class="flex items-center gap-3">
           <div id="adminBadge" class="admin-badge hidden">
             <span class="material-symbols-outlined text-sm">shield_person</span>
@@ -233,6 +233,30 @@
           <span class="feature-entry-content">
             <strong>拆解数据导出</strong>
             <small>选择模板，导入 CSV / Excel 并按需导出</small>
+          </span>
+          <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
+        </button>
+        <button type="button" class="feature-entry-card feature-entry-violet" data-feature-target="devicePowerDbPage">
+          <span class="feature-entry-icon"><span class="material-symbols-outlined">database</span></span>
+          <span class="feature-entry-content">
+            <strong>器件功耗数据库</strong>
+            <small>按器件分类维护功耗数据，支持 Excel / CSV 预览</small>
+          </span>
+          <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
+        </button>
+        <button type="button" class="feature-entry-card feature-entry-rose" data-feature-target="enduranceEstimatePage">
+          <span class="feature-entry-icon"><span class="material-symbols-outlined">timelapse</span></span>
+          <span class="feature-entry-content">
+            <strong>续航/功耗预估<span class="feature-dev-badge">开发中</span></strong>
+            <small>基于器件功耗数据预估整机续航与功耗</small>
+          </span>
+          <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
+        </button>
+        <button type="button" class="feature-entry-card feature-entry-slate" data-feature-target="enduranceStatusPage">
+          <span class="feature-entry-icon"><span class="material-symbols-outlined">monitoring</span></span>
+          <span class="feature-entry-content">
+            <strong>续航/功耗现状<span class="feature-dev-badge">开发中</span></strong>
+            <small>查看当前项目的续航与功耗实测现状</small>
           </span>
           <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
         </button>
@@ -932,6 +956,108 @@
           </article>
         </section>
       </section>
+      <section id="devicePowerDbPage" class="hidden feature-page">
+        <div class="feature-page-header">
+          <button type="button" class="template-btn template-btn-secondary" data-feature-back>
+            <span class="material-symbols-outlined text-sm">arrow_back</span> 返回主页面
+          </button>
+          <div>
+            <h2>器件功耗数据库</h2>
+            <p>按器件分类维护功耗数据，管理员可维护分类目录并上传 Excel / CSV 数据。</p>
+          </div>
+        </div>
+
+        <div class="panel panel-compact rounded-3xl p-4">
+          <div class="dpdb-layout">
+            <aside class="dpdb-sidebar">
+              <div class="dpdb-sidebar-head">
+                <h3>
+                  <span class="material-symbols-outlined">account_tree</span>
+                  器件分类
+                </h3>
+                <button id="dpdbAddCategoryBtn" type="button" class="dpdb-mini-btn" title="新建一级分类">
+                  <span class="material-symbols-outlined">add</span> 一级分类
+                </button>
+              </div>
+              <div id="dpdbMenu" class="dpdb-menu"></div>
+              <p id="dpdbAdminHint" class="dpdb-hint">当前为只读模式。管理员登录后可新建 / 重命名 / 删除分类并上传数据。</p>
+            </aside>
+
+            <section class="dpdb-content">
+              <div class="dpdb-content-head">
+                <div class="dpdb-content-title-wrap">
+                  <h3 id="dpdbContentTitle">请选择器件分类</h3>
+                  <p id="dpdbContentMeta" class="dpdb-content-meta">从左侧选择二级分类查看已上传的功耗数据。</p>
+                </div>
+                <div class="dpdb-content-actions">
+                  <input id="dpdbFileInput" type="file" accept=".csv,.xlsx,.xls" class="hidden" />
+                  <button id="dpdbUploadBtn" type="button" class="template-btn template-btn-primary template-btn-sm dpdb-admin-action">
+                    <span class="material-symbols-outlined text-sm">upload_file</span>
+                    <span id="dpdbUploadBtnLabel">上传数据</span>
+                  </button>
+                  <button id="dpdbClearDataBtn" type="button" class="template-btn template-btn-secondary template-btn-sm dpdb-admin-action">
+                    <span class="material-symbols-outlined text-sm">delete_sweep</span> 清空数据
+                  </button>
+                </div>
+              </div>
+
+              <div id="dpdbEmptyState" class="dpdb-empty">
+                <span class="material-symbols-outlined">table_view</span>
+                <p>暂无数据</p>
+                <small>请从左侧选择二级分类；管理员可上传 .xlsx / .csv 文件后在此预览。</small>
+              </div>
+
+              <div id="dpdbPreviewWrap" class="dpdb-preview-wrap hidden">
+                <div class="dpdb-preview-scroll tight-scroll">
+                  <table id="dpdbPreviewTable" class="dpdb-preview-table">
+                    <thead id="dpdbPreviewHead"></thead>
+                    <tbody id="dpdbPreviewBody"></tbody>
+                  </table>
+                </div>
+                <p id="dpdbPreviewFoot" class="dpdb-preview-foot"></p>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section id="enduranceEstimatePage" class="hidden feature-page">
+        <div class="feature-page-header">
+          <button type="button" class="template-btn template-btn-secondary" data-feature-back>
+            <span class="material-symbols-outlined text-sm">arrow_back</span> 返回主页面
+          </button>
+          <div>
+            <h2>续航/功耗预估 <span class="feature-dev-badge">开发中</span></h2>
+            <p>基于器件功耗数据库预估整机续航与各场景功耗。</p>
+          </div>
+        </div>
+        <div class="panel panel-compact rounded-3xl p-4">
+          <div class="feature-placeholder">
+            <span class="feature-placeholder-icon"><span class="material-symbols-outlined">timelapse</span></span>
+            <h3>功能开发中</h3>
+            <p>该模块正在建设中，后续将根据「器件功耗数据库」中的数据，结合使用场景时长估算整机续航与功耗分布。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="enduranceStatusPage" class="hidden feature-page">
+        <div class="feature-page-header">
+          <button type="button" class="template-btn template-btn-secondary" data-feature-back>
+            <span class="material-symbols-outlined text-sm">arrow_back</span> 返回主页面
+          </button>
+          <div>
+            <h2>续航/功耗现状 <span class="feature-dev-badge">开发中</span></h2>
+            <p>查看当前项目的续航与功耗实测现状。</p>
+          </div>
+        </div>
+        <div class="panel panel-compact rounded-3xl p-4">
+          <div class="feature-placeholder">
+            <span class="feature-placeholder-icon"><span class="material-symbols-outlined">monitoring</span></span>
+            <h3>功能开发中</h3>
+            <p>该模块正在建设中，后续将汇总实测功耗数据，展示各项目续航表现与功耗基线对比。</p>
+          </div>
+        </div>
+      </section>
     </main>
     </div>
 
@@ -941,9 +1067,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <script src="./config.js?v=2026100122"></script>
-    <script src="./supabase-auth.js?v=2026100122"></script>
-    <script src="./app.js?v=2026100122"></script>
+    <script src="./config.js?v=2026100123"></script>
+    <script src="./supabase-auth.js?v=2026100123"></script>
+    <script src="./app.js?v=2026100123"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
