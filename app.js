@@ -2696,6 +2696,23 @@ function closeFeaturePage() {
   updateFeatureBackLabels();
 }
 
+// 「功能待开发」轻提示：不打断操作，2.4s 后自动消失
+let comingSoonToastTimer = null;
+function showComingSoonToast(message) {
+  let toast = document.getElementById('comingSoonToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'comingSoonToast';
+    toast.className = 'coming-soon-toast';
+    document.body.appendChild(toast);
+  }
+  toast.innerHTML = '<span class="material-symbols-outlined">construction</span>'
+    + '<span>' + escapeHtml(message) + '</span>';
+  toast.classList.add('is-visible');
+  clearTimeout(comingSoonToastTimer);
+  comingSoonToastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2400);
+}
+
 // ---------- Data breakdown template builder ----------
 function setTemplateBuilderStatus(text, tone = 'default') {
   if (!els.templateBuilderStatus) return;
@@ -5930,6 +5947,14 @@ function bindEvents() {
 
   document.querySelectorAll('[data-feature-target]').forEach((button) => {
     button.addEventListener('click', () => openFeaturePage(button.dataset.featureTarget));
+  });
+  // 待开发入口：卡片置灰但可点，点了给一句提示，不跳转
+  document.querySelectorAll('[data-feature-coming-soon]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      const label = button.dataset.featureComingSoon || '该功能';
+      showComingSoonToast(label + '功能正在开发中，敬请期待');
+    });
   });
   document.querySelectorAll('[data-feature-back]').forEach((button) => {
     button.addEventListener('click', closeFeaturePage);

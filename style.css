@@ -520,6 +520,53 @@ body.feature-page-mode #appShell main > :not(#appTopBar):not(.feature-page) {
 .feature-entry-indigo:hover { border-color: #a5b4fc; }
 .feature-entry-rose:hover { border-color: #fda4af; }
 .feature-entry-slate:hover { border-color: #cbd5e1; }
+/* 待开发 / 不可用的入口卡片：视觉降级，但仍可点击给出提示 */
+.feature-entry-locked {
+  cursor: not-allowed;
+  background: #f8fafc;
+  border-style: dashed;
+  box-shadow: none;
+}
+.feature-entry-locked .feature-entry-content strong { color: #475569; }
+.feature-entry-locked .feature-entry-content small { color: #94a3b8; }
+.feature-entry-locked .feature-entry-icon {
+  color: #94a3b8;
+  background: #f1f5f9;
+  filter: grayscale(0.5);
+}
+.feature-entry-locked .feature-entry-arrow { color: #cbd5e1; font-size: 20px; }
+.feature-entry-locked:hover {
+  transform: none;
+  border-color: #e2e8f0;
+  box-shadow: none;
+}
+.feature-entry-locked:hover .feature-entry-arrow { color: #cbd5e1; transform: none; }
+
+/* 「功能待开发」轻提示 */
+.coming-soon-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  transform: translate(-50%, 14px);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.62rem 1.05rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.26);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 120;
+}
+.coming-soon-toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+.coming-soon-toast .material-symbols-outlined { font-size: 18px; }
+
 .feature-dev-badge {
   display: inline-block;
   margin-left: 0.4rem;
