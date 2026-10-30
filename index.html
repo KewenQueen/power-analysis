@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=2026100124" />
+    <link rel="stylesheet" href="./style.css?v=20261030d" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -397,25 +397,29 @@
             <div class="sampling-channel-heading">
               <div>
                 <h3 id="samplingChannelTitle"><span class="material-symbols-outlined">account_tree</span>采样通道梳理</h3>
-                <p>先选择资料准备方式；标准填写格式确定后，将在此处补充解析、校验与字段映射。</p>
+                <p>导入功耗板设计文档（Excel / CSV）或在线填写，自动提取通道字段；梳理完成后可在下方预览并一键生成拆解模板。</p>
               </div>
-              <span class="sampling-channel-badge">框架已预留</span>
+              <span class="sampling-channel-badge" id="samplingChannelSectionBadge">待录入</span>
             </div>
             <div class="sampling-channel-grid">
               <article class="sampling-channel-card">
                 <span class="sampling-channel-icon"><span class="material-symbols-outlined">cloud</span></span>
-                <div><strong>云文档导入</strong><small>粘贴飞书云文档或电子表格链接</small></div>
+                <div>
+                  <strong>云文档导入 <span class="sc-soon-tag">功能开发中</span></strong>
+                  <small>粘贴飞书云文档或电子表格链接（暂不解析）</small>
+                </div>
                 <input id="samplingChannelCloudUrl" type="url" placeholder="https://..." aria-label="采样通道云文档链接" />
-                <button type="button" class="template-btn template-btn-secondary" disabled>标准格式待配置</button>
+                <button type="button" class="template-btn template-btn-secondary" disabled><span class="material-symbols-outlined">lock</span>功能开发中</button>
               </article>
               <article class="sampling-channel-card">
                 <span class="sampling-channel-icon"><span class="material-symbols-outlined">upload_file</span></span>
-                <div><strong>本地文档导入</strong><small>预留 Excel / CSV 文档选择入口</small></div>
+                <div><strong>本地文档导入</strong><small>支持 Excel / CSV，自动识别表头与通道字段</small></div>
                 <label for="samplingChannelLocalFile" class="sampling-channel-file-picker">
                   <span class="material-symbols-outlined">attach_file</span>
                   <span id="samplingChannelLocalFileName">选择本地文档</span>
                 </label>
                 <input id="samplingChannelLocalFile" type="file" accept=".xlsx,.xls,.csv" class="hidden" />
+                <small id="samplingChannelLocalStatus" class="sc-import-status"></small>
               </article>
               <button id="samplingChannelOnlineToggle" type="button" class="sampling-channel-card sampling-channel-online-card" aria-expanded="false" aria-controls="samplingChannelOnlineForm">
                 <span class="sampling-channel-icon"><span class="material-symbols-outlined">edit_note</span></span>
@@ -423,6 +427,28 @@
                 <span class="sampling-channel-online-action"><span>展开填写模板</span><span class="material-symbols-outlined">expand_more</span></span>
               </button>
             </div>
+
+            <!-- 通道列表预览 + 优先级统计 -->
+            <div id="samplingChannelPreview" class="sc-preview hidden">
+              <div class="sc-preview-head">
+                <div class="sc-preview-title">
+                  <span class="material-symbols-outlined">list_alt</span>
+                  <strong>通道列表预览</strong>
+                </div>
+                <div id="samplingChannelPreviewStats" class="sc-preview-stats"></div>
+              </div>
+              <div class="sc-preview-table-wrap">
+                <table class="sc-preview-table">
+                  <thead id="samplingChannelPreviewHead"></thead>
+                  <tbody id="samplingChannelPreviewBody"></tbody>
+                </table>
+              </div>
+              <p class="sc-preview-tip">
+                <span class="material-symbols-outlined">info</span>
+                预览数据与上方在线填写表格同源，编辑后自动同步；表格可左右滚动查看全部字段。
+              </p>
+            </div>
+
             <div id="samplingChannelOnlineForm" class="sampling-channel-online-form hidden">
               <!-- 填写规则展示区域 -->
               <details id="samplingChannelRulesDisclosure" class="sampling-channel-rules">
@@ -516,18 +542,44 @@
             <div class="sampling-channel-heading">
               <div>
                 <h3 id="autoGenTitle"><span class="material-symbols-outlined">smart_toy</span>拆解模板自动生成</h3>
-                <p>基于上方「采样通道梳理」的数据（云文档 / 本地导入 / 在线填写），自动生成拆解模板；生成规则稍后补充。</p>
+                <p>基于上方「采样通道梳理」的数据，在前端直接生成标准拆解模板（8 个 Sheet），无需后端。</p>
               </div>
-              <span class="sampling-channel-badge">规则待补充</span>
+              <span class="sampling-channel-badge auto-gen-badge" id="autoGenBadge">待生成</span>
             </div>
-            <div class="auto-gen-placeholder">
-              <div class="auto-gen-placeholder-icon"><span class="material-symbols-outlined">conversion_path</span></div>
-              <div class="auto-gen-placeholder-body">
-                <strong>占位 — 自动生成区域</strong>
-                <small>输入来源：上方采样通道梳理区（云文档导入 / 本地文档导入 / 在线填写）。</small>
-                <small>生成规则将在后续补充，届时此处将展示按规则自动生成的拆解模板及一键导出能力。</small>
+
+            <div class="auto-gen-panel">
+              <div class="auto-gen-form">
+                <div class="auto-gen-field">
+                  <label for="autoGenProjectName">项目名称</label>
+                  <input id="autoGenProjectName" type="text" placeholder="例如：DoraG_量产版（留空则使用「新项目」）" autocomplete="off" />
+                </div>
+                <button id="autoGenBtn" type="button" class="auto-gen-btn" disabled>
+                  <span class="material-symbols-outlined">auto_awesome</span>
+                  <span id="autoGenBtnLabel">生成拆解模板</span>
+                </button>
               </div>
-              <span class="sampling-channel-badge auto-gen-badge">入口已就绪</span>
+
+              <p id="autoGenHint" class="auto-gen-hint">
+                <span class="material-symbols-outlined">error</span>
+                请先填写采样通道
+              </p>
+
+              <div class="auto-gen-sheets">
+                <span class="auto-gen-sheets-label">将生成的 Sheet</span>
+                <div class="auto-gen-sheet-chips">
+                  <span class="auto-gen-chip">0-封面</span>
+                  <span class="auto-gen-chip auto-gen-chip-key">1_电源配置表</span>
+                  <span class="auto-gen-chip">2_电源信息表</span>
+                  <span class="auto-gen-chip auto-gen-chip-key">3_功耗采集数据表</span>
+                  <span class="auto-gen-chip">4-统计</span>
+                  <span class="auto-gen-chip">5-测试原始数据</span>
+                  <span class="auto-gen-chip auto-gen-chip-key">6-QEPM原始数据</span>
+                  <span class="auto-gen-chip">附录-DOU测试场景</span>
+                </div>
+                <small class="auto-gen-sheets-note">橙色标签为写入通道数据的 Sheet，其余为空模板 / 占位</small>
+              </div>
+
+              <div id="autoGenResult" class="auto-gen-result hidden"></div>
             </div>
           </section>
             </div>
@@ -1096,13 +1148,14 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx-populate/browser/xlsx-populate.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="./config.js?v=2026100124"></script>
     <script src="./supabase-auth.js?v=2026100124"></script>
-    <script src="./app.js?v=2026100124"></script>
+    <script src="./app.js?v=20261030c"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

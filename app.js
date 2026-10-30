@@ -5940,10 +5940,14 @@ function bindEvents() {
     });
   }
   if (els.samplingChannelLocalFile) {
+    // The real handler lives in the sampling-channel block below (it needs the
+    // column resolver + row renderer). Keep this guard only to surface the file name.
     els.samplingChannelLocalFile.addEventListener('change', () => {
       const file = els.samplingChannelLocalFile.files && els.samplingChannelLocalFile.files[0];
-      els.samplingChannelLocalFileName.textContent = file ? file.name : '选择本地文档';
-      els.samplingChannelLocalFileName.title = file ? file.name : '';
+      if (!file) {
+        els.samplingChannelLocalFileName.textContent = '选择本地文档';
+        els.samplingChannelLocalFileName.title = '';
+      }
     });
   }
   if (els.samplingChannelOnlineToggle && els.samplingChannelOnlineForm) {
@@ -5984,6 +5988,7 @@ function bindEvents() {
       { key: 'resistor', label: '采样电阻' },
       { key: 'resistor_ref', label: '电阻位号' },
       { key: 'qc_channel', label: '采样通道QC' },
+      { key: 'ni_channel', label: '采样通道NI' },
       { key: 'dcdc_l1', label: '输入电源-1级_DCDC' },
       { key: 'ldo_l2', label: '输入电源-2级_LDO' },
       { key: 'remark', label: '备注' },
@@ -6028,7 +6033,16 @@ function bindEvents() {
 
     function getSamplingChannelOnlineCols() {
       if (customColumns === null) loadCustomColumns();
-      return (customColumns && customColumns.length > 0) ? customColumns : DEFAULT_COLUMNS;
+      const cols = (customColumns && customColumns.length > 0) ? customColumns.slice() : DEFAULT_COLUMNS.slice();
+      // Migration: older saved column sets do not include 「采样通道NI」. Insert it right
+      // after 「采样通道QC」 so imported/edited data always keeps the full 15+1 field set.
+      if (!cols.some((col) => col && col.key === 'ni_channel')) {
+        const qcIndex = cols.findIndex((col) => col && col.key === 'qc_channel');
+        const niCol = { key: 'ni_channel', label: '采样通道NI' };
+        if (qcIndex >= 0) cols.splice(qcIndex + 1, 0, niCol);
+        else cols.splice(Math.max(cols.length - 1, 0), 0, niCol);
+      }
+      return cols;
     }
 
     // ---------- Rules rendering ----------
@@ -6275,6 +6289,8 @@ function bindEvents() {
       if (els.samplingChannelOnlineRowCount) {
         els.samplingChannelOnlineRowCount.textContent = String(state.samplingChannelOnlineRows.length);
       }
+      // Keep the preview / priority stats / auto-generate button in sync.
+      if (typeof scheduleChannelSummaryRefresh === 'function') scheduleChannelSummaryRefresh(0);
     }
 
     function renderSamplingChannelOnlineRow(rowIndex) {
@@ -6307,6 +6323,7 @@ function bindEvents() {
           select.addEventListener('change', () => {
             row[col.key] = select.value;
             saveSamplingChannelOnlineDraft();
+            scheduleChannelSummaryRefresh(0);
           });
           td.appendChild(select);
         } else {
@@ -6316,6 +6333,7 @@ function bindEvents() {
           input.addEventListener('input', (event) => {
             row[col.key] = event.target.value;
             saveSamplingChannelOnlineDraft();
+            scheduleChannelSummaryRefresh();
           });
           td.appendChild(input);
         }
@@ -6583,9 +6601,682 @@ function bindEvents() {
       else if (format === 'lark') exportSamplingChannelOnlineLark();
     }
 
+    // ================================================================
+    // 采样通道梳理 —— 本地文档导入（Excel / CSV）
+    // ================================================================
+    // Header text is normalized (whitespace / underscores / brackets removed) and then
+    // matched against the standard channel fields. Matchers run specific → generic so
+    // that e.g. 「采样通道 NET+」 never collapses into 「NET」.
+    const SC_FIELD_MATCHERS = [
+      { key: 'net_plus', test: (h) => /net\+/.test(h) },
+      { key: 'net_minus', test: (h) => /net-/.test(h) || /net−/.test(h) },
+      { key: 'qc_channel', test: (h) => /采样通道qc/.test(h) || /qc通道/.test(h) || /^qc/.test(h) },
+      { key: 'ni_channel', test: (h) => /采样通道ni/.test(h) || /ni通道/.test(h) || /^ni/.test(h) },
+      { key: 'resistor_ref', test: (h) => /电阻位号|电阻编号|电阻标号|^位号|resistor(ref|no|id)/.test(h) },
+      { key: 'resistor', test: (h) => /采样电阻|电阻选型|^电阻|阻值|resistor/.test(h) },
+      { key: 'dcdc_l1', test: (h) => /dcdc/.test(h) },
+      { key: 'ldo_l2', test: (h) => /ldo/.test(h) },
+      { key: 'tiny_module', test: (h) => /tiny|小模块/.test(h) },
+      { key: 'sub_module', test: (h) => /子模块|submodule|sub-module/.test(h) },
+      { key: 'power_domain', test: (h) => /powerdomain|电源域/.test(h) },
+      { key: 'priority', test: (h) => /优先级|priority|重要度/.test(h) },
+      { key: 'module', test: (h) => /^模块|模块名/.test(h) },
+      { key: 'schematic_check', test: (h) => /原理图|schematic/.test(h) },
+      { key: 'remark', test: (h) => /备注|remark|说明|^note$/.test(h) },
+      { key: 'net', test: (h) => /^net$|^网络$|^电源网络$|^采样通道$|^通道名$/.test(h) },
+    ];
+
+    function normalizeChannelHeader(value) {
+      return String(value == null ? '' : value)
+        .replace(/\u00a0/g, ' ')
+        .replace(/\s+/g, '')
+        .replace(/[（）]/g, (m) => (m === '（' ? '(' : ')'))
+        .replace(/_/g, '')
+        .replace(/[·・]/g, '')
+        .replace(/[：:]$/, '')
+        .toLowerCase();
+    }
+
+    // Excel rich text / CRLF come back from SheetJS as "_x000d_" style escapes; the
+    // online grid is single-line, so collapse everything into one clean line.
+    function sanitizeChannelText(value) {
+      return String(value == null ? '' : value)
+        .replace(/_x000d_/gi, '')
+        .replace(/_x000a_/gi, ' ')
+        .replace(/_x0009_/gi, ' ')
+        .replace(/[\r\n\t]+/g, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+    }
+
+    function normalizeChannelPriority(value) {
+      const text = sanitizeChannelText(value);
+      if (!text) return '';
+      const compact = text.replace(/\s+/g, '').replace(/[（）]/g, (m) => (m === '（' ? '(' : ')'));
+      if (/不测|免测|不采集/.test(compact)) return '不测';
+      if (/必须\(qc\)|必测\(qc\)|必须\(QC\)/i.test(compact)) return '必须(QC)';
+      if (/合并/.test(compact)) return '合并';
+      if (/必须|必测/.test(compact)) return '必须';
+      if (/可选|选测/.test(compact)) return '可选';
+      return text;
+    }
+
+    function readFileAsDecodedText(file) {
+      return file.arrayBuffer().then((buffer) => {
+        let text = new TextDecoder('utf-8').decode(buffer);
+        if (text.indexOf('\uFFFD') !== -1) {
+          try { text = new TextDecoder('gbk').decode(buffer); } catch { /* keep utf-8 */ }
+        }
+        return text.replace(/^\uFEFF/, '');
+      });
+    }
+
+    // Always returns { sheets: [{ name, rows }], resolve(name) } so sheet selection is
+    // uniform across csv/xlsx. Detection only reads the first rows of each sheet (a
+    // 10MB workbook can hold 5k × 275 QEPM rows we never need for header sniffing).
+    async function readChannelFileSheets(file) {
+      const fileName = String(file.name || '').toLowerCase();
+      if (/\.csv$/.test(fileName)) {
+        const text = await readFileAsDecodedText(file);
+        let rows;
+        if (window.Papa && typeof window.Papa.parse === 'function') {
+          rows = (window.Papa.parse(text, { header: false, skipEmptyLines: false }).data) || [];
+        } else {
+          rows = text.split(/\r?\n/).map((line) => line.split(','));
+        }
+        return { sheets: [{ name: file.name, rows }], resolve: async () => rows };
+      }
+      if (typeof XLSX === 'undefined' || !XLSX.utils) {
+        throw new Error('Excel 解析库（SheetJS）未加载，请检查网络后刷新页面重试');
+      }
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const DETECT_ROWS = 40;
+      const toMatrix = (sheet, sheetRows) => XLSX.utils.sheet_to_json(sheet, {
+        header: 1, raw: false, defval: '', blankrows: false, sheetRows,
+      });
+      const sheets = workbook.SheetNames.map((sheetName) => ({
+        name: sheetName,
+        rows: toMatrix(workbook.Sheets[sheetName], DETECT_ROWS),
+        truncated: (workbook.Sheets[sheetName] && workbook.Sheets[sheetName]['!ref'])
+          ? (XLSX.utils.decode_range(workbook.Sheets[sheetName]['!ref']).e.r + 1) > DETECT_ROWS
+          : false,
+      }));
+      return {
+        sheets,
+        resolve: async (name) => {
+          const hit = sheets.find((sheet) => sheet.name === name);
+          const sheet = workbook.Sheets[name];
+          if (!sheet || !hit) return [];
+          if (!hit.truncated) return hit.rows;
+          return toMatrix(sheet);
+        },
+      };
+    }
+
+    function detectChannelHeaderRow(rows) {
+      let best = null;
+      const scanLimit = Math.min(rows.length, 30);
+      for (let r = 0; r < scanLimit; r += 1) {
+        const row = rows[r] || [];
+        const map = {};
+        let matched = 0;
+        for (let c = 0; c < row.length; c += 1) {
+          const header = normalizeChannelHeader(row[c]);
+          if (!header || header.length > 26) continue;
+          for (const matcher of SC_FIELD_MATCHERS) {
+            if (matcher.test(header)) {
+              if (map[matcher.key] === undefined) { map[matcher.key] = c; matched += 1; }
+              break;
+            }
+          }
+        }
+        const anchored = map.module !== undefined || map.power_domain !== undefined
+          || map.net !== undefined || map.net_plus !== undefined;
+        if (matched >= 3 && anchored && (!best || matched > best.matched)) {
+          best = { rowIndex: r, map, matched };
+        }
+      }
+      return best;
+    }
+
+    function buildChannelRowsFromMatrix(rows, headerRowIndex, headerMap) {
+      const cols = getSamplingChannelOnlineCols();
+      const nameMatcher = (value) => normalizeChannelHeader(value);
+      const out = [];
+      for (let r = headerRowIndex + 1; r < rows.length; r += 1) {
+        const raw = rows[r] || [];
+        const row = {};
+        cols.forEach((col) => { row[col.key] = ''; });
+        let filled = 0;
+        Object.keys(headerMap).forEach((key) => {
+          const value = raw[headerMap[key]];
+          const text = sanitizeChannelText(value);
+          row[key] = text;
+          if (text) filled += 1;
+        });
+        row.priority = normalizeChannelPriority(row.priority);
+        if (filled < 2) continue;
+        if (!row.module && !row.power_domain && !row.net && !row.net_plus) continue;
+        // Guard against a duplicated header row in the middle of the sheet.
+        if (/^模块$/.test(nameMatcher(row.module)) || /^子模块$/.test(nameMatcher(row.sub_module))) continue;
+        if (/^powerdomain$/.test(nameMatcher(row.power_domain))) continue;
+        // Guard against summary / footer rows (合计、总计、Total…).
+        if (/^(合计|总计|小计|汇总|总功耗|total|sum)/i.test(row.module)
+          || /^(合计|总计|小计|汇总|总功耗|total|sum)/i.test(row.power_domain)) continue;
+        out.push(row);
+      }
+      return out;
+    }
+
+    function setLocalImportStatus(text, tone) {
+      const statusEl = document.getElementById('samplingChannelLocalStatus');
+      if (!statusEl) return;
+      statusEl.textContent = text;
+      statusEl.dataset.tone = tone || '';
+    }
+
+    async function handleSamplingChannelLocalFile(file) {
+      if (!file) return;
+      if (els.samplingChannelLocalFileName) {
+        els.samplingChannelLocalFileName.textContent = file.name;
+        els.samplingChannelLocalFileName.title = file.name;
+      }
+      setLocalImportStatus('正在解析文档…', 'loading');
+      try {
+        const bundle = await readChannelFileSheets(file);
+        let best = null;
+        for (const sheet of bundle.sheets) {
+          const header = detectChannelHeaderRow(sheet.rows);
+          if (header && (!best || header.matched > best.header.matched)) {
+            best = { header, sheetName: sheet.name };
+          }
+        }
+        if (!best) {
+          throw new Error('未识别到采样通道表头（需包含「模块」「power domain」「采样通道 NET+」等字段）');
+        }
+        const fullRows = await bundle.resolve(best.sheetName);
+        const parsedRows = buildChannelRowsFromMatrix(fullRows, best.header.rowIndex, best.header.map);
+        if (!parsedRows.length) {
+          throw new Error('在「' + best.sheetName + '」中识别到表头，但未解析到有效通道数据');
+        }
+
+        let mode = 'replace';
+        const existing = state.samplingChannelOnlineRows.length;
+        if (existing > 0) {
+          mode = window.confirm(
+            '解析到 ' + parsedRows.length + ' 条通道记录（来源 Sheet：' + best.sheetName + '）。\n\n' +
+            '点击「确定」= 覆盖当前 ' + existing + ' 行数据\n' +
+            '点击「取消」= 追加到当前数据之后'
+          ) ? 'replace' : 'append';
+        }
+        state.samplingChannelOnlineRows = mode === 'replace'
+          ? parsedRows
+          : state.samplingChannelOnlineRows.concat(parsedRows);
+        saveSamplingChannelOnlineDraft();
+        renderAllSamplingChannelOnlineRows();
+        renderChannelPreview();
+        updateSamplingChannelSectionBadge();
+        updateAutoGenAvailability();
+
+        setLocalImportStatus(
+          '已从「' + best.sheetName + '」解析 ' + parsedRows.length + ' 条通道' + (mode === 'append' ? '（追加）' : ''),
+          'success'
+        );
+      } catch (error) {
+        console.error(error);
+        setLocalImportStatus('解析失败：' + (error.message || '未知错误'), 'error');
+        alert('文档解析失败：\n' + (error.message || '未知错误'));
+      } finally {
+        if (els.samplingChannelLocalFile) els.samplingChannelLocalFile.value = '';
+      }
+    }
+
+    // ================================================================
+    // 采样通道梳理 —— 通道列表预览 + 优先级统计
+    // ================================================================
+    const SC_PRIORITY_GROUPS = [
+      { key: 'must', label: '必测', tone: 'must' },
+      { key: 'merge', label: '合并', tone: 'merge' },
+      { key: 'optional', label: '可选', tone: 'optional' },
+      { key: 'skip', label: '不测', tone: 'skip' },
+      { key: 'unlabeled', label: '未标注', tone: 'muted' },
+    ];
+    const SC_PREVIEW_MAX_ROWS = 500;
+
+    function samplingChannelPriorityGroup(value) {
+      const text = String(value == null ? '' : value).trim();
+      if (!text) return 'unlabeled';
+      if (/^不测/.test(text)) return 'skip';
+      if (/^合并/.test(text)) return 'merge';
+      if (/^可选/.test(text)) return 'optional';
+      if (/^必须|^必测/.test(text)) return 'must';
+      return 'unlabeled';
+    }
+
+    function updateSamplingChannelSectionBadge() {
+      const badge = document.getElementById('samplingChannelSectionBadge');
+      if (!badge) return;
+      const count = state.samplingChannelOnlineRows.length;
+      badge.textContent = count > 0 ? '已录入 ' + count + ' 个通道' : '待录入';
+      badge.classList.toggle('is-filled', count > 0);
+    }
+
+    function renderChannelPreview() {
+      const wrap = document.getElementById('samplingChannelPreview');
+      const head = document.getElementById('samplingChannelPreviewHead');
+      const body = document.getElementById('samplingChannelPreviewBody');
+      const statsEl = document.getElementById('samplingChannelPreviewStats');
+      if (!wrap || !head || !body || !statsEl) return;
+
+      const rows = state.samplingChannelOnlineRows;
+      if (!rows.length) {
+        wrap.classList.add('hidden');
+        head.innerHTML = '';
+        body.innerHTML = '';
+        statsEl.innerHTML = '';
+        return;
+      }
+      wrap.classList.remove('hidden');
+      const cols = getSamplingChannelOnlineCols();
+
+      const counts = { must: 0, merge: 0, optional: 0, skip: 0, unlabeled: 0 };
+      rows.forEach((row) => { counts[samplingChannelPriorityGroup(row.priority)] += 1; });
+
+      statsEl.innerHTML = '<span class="sc-stat sc-stat-total">通道总数 <b>' + rows.length + '</b></span>'
+        + SC_PRIORITY_GROUPS.filter((group) => group.key !== 'unlabeled' || counts.unlabeled > 0)
+          .map((group) => '<span class="sc-stat sc-stat-' + group.tone + '">' + group.label + ' <b>' + counts[group.key] + '</b></span>')
+          .join('');
+
+      head.innerHTML = '<tr><th class="sc-preview-idx">#</th>'
+        + cols.map((col) => '<th>' + escapeHtml(col.label) + '</th>').join('')
+        + '</tr>';
+
+      const limit = Math.min(rows.length, SC_PREVIEW_MAX_ROWS);
+      const html = [];
+      for (let i = 0; i < limit; i += 1) {
+        const row = rows[i] || {};
+        const cells = cols.map((col) => {
+          const value = row[col.key] == null ? '' : String(row[col.key]);
+          if (!value) return '<td class="sc-preview-empty">—</td>';
+          if (col.key === 'priority') {
+            return '<td><span class="sc-preview-prio sc-preview-prio-' + samplingChannelPriorityGroup(value) + '">'
+              + escapeHtml(value) + '</span></td>';
+          }
+          return '<td title="' + escapeHtml(value) + '">' + escapeHtml(value) + '</td>';
+        }).join('');
+        html.push('<tr><td class="sc-preview-idx">' + (i + 1) + '</td>' + cells + '</tr>');
+      }
+      body.innerHTML = html.join('');
+      if (rows.length > limit) {
+        body.innerHTML += '<tr><td class="sc-preview-idx">…</td><td colspan="' + cols.length
+          + '" class="sc-preview-more">仅展示前 ' + limit + ' 行，完整数据共 ' + rows.length + ' 行（生成的模板包含全部数据）</td></tr>';
+      }
+    }
+
+    let scSummaryTimer = null;
+    // Set once a template has been generated; cleared as soon as the channel data changes.
+    let autoGenDone = false;
+    function scheduleChannelSummaryRefresh(delay = 220) {
+      if (scSummaryTimer) clearTimeout(scSummaryTimer);
+      scSummaryTimer = setTimeout(() => {
+        scSummaryTimer = null;
+        autoGenDone = false;
+        renderChannelPreview();
+        updateSamplingChannelSectionBadge();
+        updateAutoGenAvailability();
+      }, delay);
+    }
+
+    // ================================================================
+    // 拆解模板自动生成（SheetJS，纯前端）
+    // ================================================================
+    const AUTO_GEN_PROJECT_KEY = 'sampling_channel_project_name_v1';
+    const BREAKDOWN_SHEET_NAMES = ['0-封面', '1_电源配置表', '2_电源信息表', '3_功耗采集数据表', '4-统计', '5-测试原始数据', '6-QEPM原始数据', '附录-DOU测试场景'];
+
+    // 1_电源配置表 A-P
+    const POWER_CONFIG_HEADERS = ['模块', '子模块', 'tiny模块', 'power domain', '优先级', 'NET', '采样通道 NET+', '采样通道 NET-', '采样电阻', '电阻位号', '采样通道QC', '采样通道NI', '输入电源-1级_DCDC', '输入电源-2级_LDO', '备注', '原理图CHECK'];
+    const POWER_CONFIG_FIELDS = ['module', 'sub_module', 'tiny_module', 'power_domain', 'priority', 'net', 'net_plus', 'net_minus', 'resistor', 'resistor_ref', 'qc_channel', 'ni_channel', 'dcdc_l1', 'ldo_l2', 'remark', 'schematic_check'];
+
+    // 3_功耗采集数据表 A-X（24 列，含 4 个待计算的功率列）
+    const ACQ_HEADERS = ['模块', '子模块', 'tiny模块', 'power domain', '优先级', '采样通道', '采样通道 NET+', '采样通道 NET-', '采样电阻\n_mΩ', '电阻编号', '采样通道\nQC', '采样通道\nNI', '采样通道编号\n（QEPM）', '模块', '子模块', 'tiny模块', '输入电源-1级_DCDC', 'Efficiency', '输入电源-2级_LDO', 'Efficiency', 'Total\nEfficiency', 'Power @VBATT\nmW', 'Include \nin Sum?', 'Power in Sum\n(mW)'];
+    const ACQ_SUB_HEADERS = ['', '子模块', 'tiny模块', 'power domain', '', '', '', '采样电阻\nmΩ', '电阻选型', '电阻编号', '采样通道', '采样通道', '', 'Vavg(V)', 'Iavg(mA)', 'Pavg(mW)', 'DCDC', 'Efficiency', 'LDO', 'Efficiency', '', '', '', ''];
+
+    const POWER_CONFIG_NOTES = [
+      '通道设计原则：',
+      '1、通道兼容NI和QC采集设备；目标按照2组+1采集卡设计：NI（2*40+10=90ch），QC（48*2=96ch）；',
+      '2、QC相比NI采样通道更多，有些电源效率的采集通道仅配置在QC采集通道上；',
+      '3、受布板面积以及走线限制，有些电源网络无法采集，根据实际走线情况调整布局；',
+      '必测项：关键器件的核心电源域为必须采集项',
+      '必测项(QC)：部分电源效率的电流采集通道',
+      '合并项：共同电源域的小电流采集通道',
+      '可选项：电流小且稳定的电流采集通道，在有通道冗余时可选择增加通道；',
+      '不测项：电源前后级输入输出仅测一端（输入/输出，以负载输出为主）；电流非常小没必要采集的电流采集通道：如上拉电源/GPIO参考电源/有其他手段测量的小电流通道；',
+    ].join('\n');
+
+    function scText(row, key) {
+      const raw = row ? row[key] : '';
+      return raw == null ? '' : String(raw).trim();
+    }
+
+    function scSheetValue(row, key) {
+      const text = sanitizeChannelText(scText(row, key));
+      if (!text) return '';
+      if (key === 'resistor' && NUMERIC_RE.test(text)) return Number(text);
+      return text;
+    }
+
+    function scQepmChannelName(row) {
+      const channel = scText(row, 'qc_channel');
+      const minus = scText(row, 'net_minus');
+      if (!channel) return '';
+      if (!minus || minus === '-') return channel;
+      return channel + '_' + minus;
+    }
+
+    function scUniqueValues(rows, key) {
+      const seen = new Set();
+      const out = [];
+      rows.forEach((row) => {
+        const value = scText(row, key);
+        if (!value || value === '-' || seen.has(value)) return;
+        seen.add(value);
+        out.push(value);
+      });
+      return out;
+    }
+
+    function scSheetFromAoa(aoa, options = {}) {
+      const sheet = XLSX.utils.aoa_to_sheet(aoa);
+      if (options.cols) sheet['!cols'] = options.cols;
+      if (options.merges && options.merges.length) sheet['!merges'] = options.merges;
+      return sheet;
+    }
+
+    function scFileName(projectName) {
+      const safe = String(projectName || '').trim()
+        .replace(/[\\/:*?"<>|]+/g, '_')
+        .replace(/\s+/g, '_') || '新项目';
+      const now = new Date();
+      const ds = now.getFullYear()
+        + String(now.getMonth() + 1).padStart(2, '0')
+        + String(now.getDate()).padStart(2, '0');
+      return safe + '_功耗拆解数据处理模板_' + ds + '.xlsx';
+    }
+
+    function buildQepmSheetAoa(channelNames) {
+      const parts = [['', 'Start Time:', '', 'Duration:', '', 'Time Precision:', '', 'Time Adjustment:', '', 'Target Size:', '']];
+      parts.push([]);
+      const header = ['Time Offset'];
+      const epmRow = [''];
+      channelNames.forEach((name, index) => {
+        header.push(name + '_I', name + '_P', name + '_V');
+        const base = index * 32;
+        epmRow.push('EPM' + base + '.0', 'EPM' + base + '.0P', 'EPM' + (base + 1) + '.0');
+      });
+      parts.push(header);
+      if (channelNames.length) parts.push(epmRow);
+      return parts;
+    }
+
+    function buildBreakdownWorkbook(rows, projectName) {
+      const channels = rows.filter((row) => Object.keys(row).some((key) => scText(row, key) !== ''));
+      const projectLabel = String(projectName || '').trim() || '新项目';
+      const today = new Date();
+      const dateLabel = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0')
+        + '-' + String(today.getDate()).padStart(2, '0');
+      const workbook = XLSX.utils.book_new();
+
+      // ---------- 0-封面 ----------
+      const cover = [
+        ['功耗拆解数据处理模板'],
+        [],
+        ['项目名称', projectLabel],
+        ['生成日期', dateLabel],
+        ['通道数量', channels.length],
+        ['生成方式', '功耗续航工作台 · 项目模板管理 · 拆解模板自动生成'],
+        [],
+        ['Sheet', '说明'],
+        ['0-封面', '项目信息与模板说明'],
+        ['1_电源配置表', '采样通道清单（通道设计原则 + 逐通道配置）'],
+        ['2_电源信息表', '电池信息 / SMPS 效率表（待填写）'],
+        ['3_功耗采集数据表', '采集数据汇总；Total Efficiency / Power @VBATT mW / Include in Sum? / Power in Sum(mW) 由实测数据计算'],
+        ['4-统计', '模块占比统计（公式待补充）'],
+        ['5-测试原始数据', '测试仪原始数据（由 QEPM 原始数据计算）'],
+        ['6-QEPM原始数据', 'QEPM 导出原始数据粘贴区（表头已按采样通道生成）'],
+        ['附录-DOU测试场景', 'DOU 测试场景说明'],
+        [],
+        ['使用说明', '1、核对 1_电源配置表 通道信息；2、将 QEPM 导出数据粘贴到 6-QEPM原始数据；3、在 3_功耗采集数据表 填写实测 Vavg / Iavg / Pavg 与电源效率；4、补齐统计表公式。'],
+      ];
+      workbook.SheetNames.push('0-封面');
+      workbook.Sheets['0-封面'] = scSheetFromAoa(cover, {
+        cols: [{ wch: 26 }, { wch: 88 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 30 }],
+        merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }],
+      });
+
+      // ---------- 1_电源配置表 ----------
+      const configAoa = [[POWER_CONFIG_NOTES], POWER_CONFIG_HEADERS];
+      channels.forEach((row) => {
+        configAoa.push(POWER_CONFIG_FIELDS.map((key) => scSheetValue(row, key)));
+      });
+      workbook.SheetNames.push('1_电源配置表');
+      workbook.Sheets['1_电源配置表'] = scSheetFromAoa(configAoa, {
+        cols: [{ wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 24 }, { wch: 26 }, { wch: 26 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 12 }],
+        merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 15 } }],
+      });
+
+      // ---------- 2_电源信息表 ----------
+      const batteryBlock = [
+        ['1. Battery Information'],
+        ['Battery Type', 'Vbat (V)', 'Vsys (V)', 'Vbat to Vsys Efficiency'],
+        ['Single Cell', 4, 4, 1],
+        [],
+        ['2. SMPS Information(效率需更新)'],
+        ['PMIC', 'SMPS', 'Type', 'Voltage (V)', 'Efficiency by Load (mA)', '', '', '', '', '', '', 'Itotal in Current Case (mA)', 'Efficiency in Current Case', '备注'],
+        ['', '', '', '', 1, 10, 100, 1000, 2500, 4000, 10000, '', '', '效率值按实测更新，默认 0.8'],
+      ];
+      const dcdcList = scUniqueValues(channels, 'dcdc_l1');
+      const ldoList = scUniqueValues(channels, 'ldo_l2');
+      const infoAoa = batteryBlock.slice();
+      if (dcdcList.length || ldoList.length) {
+        infoAoa.push([]);
+        infoAoa.push(['3. DCDC / LDO 清单（来自采样通道梳理）']);
+        infoAoa.push(['类型', '名称', '关联通道数']);
+        const countOf = (key, value) => channels.filter((row) => scText(row, key) === value).length;
+        dcdcList.forEach((name) => infoAoa.push(['DCDC', name, countOf('dcdc_l1', name)]));
+        ldoList.forEach((name) => infoAoa.push(['LDO', name, countOf('ldo_l2', name)]));
+      }
+      workbook.SheetNames.push('2_电源信息表');
+      workbook.Sheets['2_电源信息表'] = scSheetFromAoa(infoAoa, {
+        cols: [{ wch: 20 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 40 }],
+      });
+
+      // ---------- 3_功耗采集数据表 ----------
+      const acqAoa = [['Power Board Channel Allocation'], ACQ_HEADERS, ACQ_SUB_HEADERS];
+      channels.forEach((row) => {
+        acqAoa.push([
+          scSheetValue(row, 'module'),
+          scSheetValue(row, 'sub_module'),
+          scSheetValue(row, 'tiny_module'),
+          scSheetValue(row, 'power_domain'),
+          scSheetValue(row, 'priority'),
+          scSheetValue(row, 'net'),
+          scSheetValue(row, 'net_plus'),
+          scSheetValue(row, 'net_minus'),
+          scSheetValue(row, 'resistor'),
+          scSheetValue(row, 'resistor_ref'),
+          scSheetValue(row, 'qc_channel'),
+          scSheetValue(row, 'ni_channel'),
+          scQepmChannelName(row),
+          '', '', '',
+          scSheetValue(row, 'dcdc_l1'), '', scSheetValue(row, 'ldo_l2'), '',
+          '', '', '', '',
+        ]);
+      });
+      workbook.SheetNames.push('3_功耗采集数据表');
+      workbook.Sheets['3_功耗采集数据表'] = scSheetFromAoa(acqAoa, {
+        cols: [{ wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 10 }, { wch: 12 }, { wch: 13 }, { wch: 16 }, { wch: 22 }, { wch: 11 }, { wch: 11 }, { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 13 }, { wch: 14 }, { wch: 13 }, { wch: 14 }],
+        merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 23 } }],
+      });
+
+      // ---------- 4-统计 ----------
+      const modules = scUniqueValues(channels, 'module');
+      const statsAoa = [];
+      const statBlock = (title, subTitle, note) => {
+        statsAoa.push([title]);
+        statsAoa.push([subTitle]);
+        statsAoa.push(modules.concat(['ERROR']));
+        statsAoa.push(modules.map(() => '').concat(['']));
+        statsAoa.push([]);
+        if (note) statsAoa.push([note]);
+      };
+      statBlock('1. 模块占比', '折算到电池端_mW@VBAT(含电源效率，电源效率存在误差)');
+      statBlock('负载端_mW@负载(无电源效率)', '按模块汇总负载端功率（公式待补充）');
+      statBlock('负载端/电池端效率_%', '各模块电源转换效率（公式待补充）');
+      if (!modules.length) statsAoa.push(['（尚未梳理模块信息，请先在 1_电源配置表 中填写「模块」列）']);
+      statsAoa.push(['说明：本版本仅生成统计表骨架（模块行列已按通道数据生成），公式将在后续版本补充。']);
+      workbook.SheetNames.push('4-统计');
+      workbook.Sheets['4-统计'] = scSheetFromAoa(statsAoa, {
+        cols: [{ wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 }],
+      });
+
+      // ---------- 5-测试原始数据 / 6-QEPM原始数据 ----------
+      const channelNames = channels.map((row) => scQepmChannelName(row)).filter(Boolean);
+      const testRawAoa = buildQepmSheetAoa(channelNames);
+      workbook.SheetNames.push('5-测试原始数据');
+      workbook.Sheets['5-测试原始数据'] = scSheetFromAoa(testRawAoa);
+
+      const qepmAoa = buildQepmSheetAoa(channelNames);
+      workbook.SheetNames.push('6-QEPM原始数据');
+      workbook.Sheets['6-QEPM原始数据'] = scSheetFromAoa(qepmAoa, {
+        cols: [{ wch: 12 }].concat(channelNames.flatMap(() => [{ wch: 14 }, { wch: 14 }, { wch: 12 }])),
+      });
+
+      // ---------- 附录-DOU测试场景 ----------
+      const appendixAoa = [
+        ['DOU 测试场景'],
+        ['测试场景', '场景说明', '对应模块', '备注'],
+        ['（待补充）', '', '', ''],
+      ];
+      workbook.SheetNames.push('附录-DOU测试场景');
+      workbook.Sheets['附录-DOU测试场景'] = scSheetFromAoa(appendixAoa, {
+        cols: [{ wch: 20 }, { wch: 46 }, { wch: 20 }, { wch: 24 }],
+      });
+
+      return workbook;
+    }
+
+    function updateAutoGenAvailability() {
+      const button = document.getElementById('autoGenBtn');
+      const label = document.getElementById('autoGenBtnLabel');
+      const hint = document.getElementById('autoGenHint');
+      const badge = document.getElementById('autoGenBadge');
+      if (!button) return;
+
+      const validCount = state.samplingChannelOnlineRows
+        .filter((row) => Object.keys(row).some((key) => scText(row, key) !== '')).length;
+
+      button.disabled = validCount === 0;
+      button.classList.toggle('is-ready', validCount > 0);
+      if (label) label.textContent = validCount > 0 ? '生成拆解模板（' + validCount + ' 个通道）' : '生成拆解模板';
+      if (hint) {
+        hint.classList.toggle('is-ready', validCount > 0);
+        hint.innerHTML = validCount > 0
+          ? '<span class="material-symbols-outlined">task_alt</span>已就绪：将写入 ' + validCount + ' 条通道到 1_电源配置表 与 3_功耗采集数据表'
+          : '<span class="material-symbols-outlined">error</span>请先填写采样通道';
+      }
+      if (badge) badge.textContent = validCount === 0 ? '待生成' : (autoGenDone ? '已生成' : '可生成');
+    }
+
+    function showAutoGenResult(fileName, channelCount, sizeText) {
+      const box = document.getElementById('autoGenResult');
+      if (!box) return;
+      autoGenDone = true;
+      box.classList.remove('hidden');
+      box.classList.remove('is-error');
+      box.innerHTML = '<span class="material-symbols-outlined">download_done</span>'
+        + '<div class="auto-gen-result-body">'
+        + '<strong>已生成：' + escapeHtml(fileName) + '</strong>'
+        + '<small>' + channelCount + ' 条通道 · ' + BREAKDOWN_SHEET_NAMES.length + ' 个 Sheet · ' + escapeHtml(sizeText || '') + '</small>'
+        + '</div>';
+    }
+
+    function showAutoGenError(message) {
+      const box = document.getElementById('autoGenResult');
+      if (!box) return;
+      box.classList.remove('hidden');
+      box.classList.add('is-error');
+      box.innerHTML = '<span class="material-symbols-outlined">error</span>'
+        + '<div class="auto-gen-result-body"><strong>生成失败</strong><small>' + escapeHtml(message || '未知错误') + '</small></div>';
+    }
+
+    function handleAutoGenClick() {
+      const rows = state.samplingChannelOnlineRows
+        .filter((row) => Object.keys(row).some((key) => scText(row, key) !== ''));
+      if (!rows.length) {
+        alert('请先填写采样通道');
+        return;
+      }
+      if (typeof XLSX === 'undefined' || !XLSX.utils) {
+        alert('Excel 生成库（SheetJS）未加载，请检查网络后刷新页面重试');
+        return;
+      }
+      const button = document.getElementById('autoGenBtn');
+      const projectNameInput = document.getElementById('autoGenProjectName');
+      const projectName = String((projectNameInput && projectNameInput.value) || '').trim();
+      const originalLabel = button ? button.innerHTML : '';
+      if (button) {
+        button.disabled = true;
+        button.innerHTML = '<span class="material-symbols-outlined animate-spin">progress_activity</span> 正在生成…';
+      }
+      try {
+        const workbook = buildBreakdownWorkbook(rows, projectName);
+        const fileName = scFileName(projectName);
+        XLSX.writeFile(workbook, fileName, { compression: true });
+        try { localStorage.setItem(AUTO_GEN_PROJECT_KEY, projectName); } catch { /* ignore */ }
+        const sizeText = '命名规则：项目名_功耗拆解数据处理模板_日期.xlsx';
+        showAutoGenResult(fileName, rows.length, sizeText);
+      } catch (error) {
+        console.error(error);
+        showAutoGenError(error && error.message ? error.message : '未知错误');
+        alert('拆解模板生成失败：\n' + (error && error.message ? error.message : '未知错误'));
+      } finally {
+        if (button) {
+          button.innerHTML = originalLabel;
+          button.disabled = false;
+          updateAutoGenAvailability();
+        }
+      }
+    }
+
+    // Restore last used project name + wire up the generate button.
+    (function initAutoGenPanel() {
+      const projectNameInput = document.getElementById('autoGenProjectName');
+      if (projectNameInput) {
+        try {
+          const saved = localStorage.getItem(AUTO_GEN_PROJECT_KEY);
+          if (saved) projectNameInput.value = saved;
+        } catch { /* ignore */ }
+      }
+      const button = document.getElementById('autoGenBtn');
+      if (button) button.addEventListener('click', handleAutoGenClick);
+      updateAutoGenAvailability();
+    })();
+
+    // Local document import wiring.
+    if (els.samplingChannelLocalFile) {
+      els.samplingChannelLocalFile.addEventListener('change', (event) => {
+        const file = event.target.files && event.target.files[0];
+        if (file) handleSamplingChannelLocalFile(file);
+      });
+    }
+
     // Load saved draft
     loadSamplingChannelOnlineDraft();
     renderAllSamplingChannelOnlineRows();
+    renderChannelPreview();
+    updateSamplingChannelSectionBadge();
+    updateAutoGenAvailability();
 
     // Toggle logic
     els.samplingChannelOnlineToggle.addEventListener('click', () => {
