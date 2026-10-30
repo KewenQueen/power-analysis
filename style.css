@@ -520,28 +520,6 @@ body.feature-page-mode #appShell main > :not(#appTopBar):not(.feature-page) {
 .feature-entry-indigo:hover { border-color: #a5b4fc; }
 .feature-entry-rose:hover { border-color: #fda4af; }
 .feature-entry-slate:hover { border-color: #cbd5e1; }
-/* 待开发 / 不可用的入口卡片：视觉降级，但仍可点击给出提示 */
-.feature-entry-locked {
-  cursor: not-allowed;
-  background: #f8fafc;
-  border-style: dashed;
-  box-shadow: none;
-}
-.feature-entry-locked .feature-entry-content strong { color: #475569; }
-.feature-entry-locked .feature-entry-content small { color: #94a3b8; }
-.feature-entry-locked .feature-entry-icon {
-  color: #94a3b8;
-  background: #f1f5f9;
-  filter: grayscale(0.5);
-}
-.feature-entry-locked .feature-entry-arrow { color: #cbd5e1; font-size: 20px; }
-.feature-entry-locked:hover {
-  transform: none;
-  border-color: #e2e8f0;
-  box-shadow: none;
-}
-.feature-entry-locked:hover .feature-entry-arrow { color: #cbd5e1; transform: none; }
-
 /* 「功能待开发」轻提示 */
 .coming-soon-toast {
   position: fixed;
@@ -2394,6 +2372,66 @@ body.col-resizing {
   line-height: 1.5;
 }
 .auto-gen-badge { background: #fef3c7; color: #92400e; }
+
+/* ===== 配置文件生成（待开发占位区块，结构与「拆解模板自动生成」对齐）===== */
+.config-gen-section {
+  border-color: #e2e8f0;
+  background: linear-gradient(135deg, #fbfcfe, #f4f6fa);
+}
+.config-gen-section .sampling-channel-heading h3 { color: #334155; }
+.config-gen-badge { background: #f1f5f9; color: #64748b; border: 1px dashed #cbd5e1; }
+.config-gen-panel {
+  margin-top: .65rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  flex-wrap: wrap;
+  padding: .75rem .9rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: .85rem;
+  background: #f8fafc;
+}
+.config-gen-placeholder { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+.config-gen-placeholder-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: .7rem;
+  background: #eef2f7;
+  color: #94a3b8;
+}
+.config-gen-placeholder-icon .material-symbols-outlined { font-size: 1.1rem; }
+.config-gen-placeholder-body { min-width: 0; }
+.config-gen-placeholder-body strong { display: block; color: #475569; font-size: .76rem; font-weight: 800; }
+.config-gen-placeholder-body small { display: block; margin-top: .22rem; color: #94a3b8; font-size: .67rem; line-height: 1.5; }
+.config-gen-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .35rem;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 1rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: .6rem;
+  background: #eef2f7;
+  color: #94a3b8;
+  font-size: .72rem;
+  font-weight: 800;
+  cursor: not-allowed;
+  white-space: nowrap;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.config-gen-btn .material-symbols-outlined { font-size: 1rem; }
+.config-gen-btn:hover { background: #e7ecf3; border-color: #b8c4d4; color: #7c8ba1; }
+.config-gen-btn:active { transform: none; }
+@media (max-width: 640px) {
+  .config-gen-panel { align-items: flex-start; }
+  .config-gen-btn { width: 100%; }
+}
 
 /* ===== Admin-only visibility ===== */
 .admin-only-hidden { display: none !important; }

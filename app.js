@@ -5948,12 +5948,11 @@ function bindEvents() {
   document.querySelectorAll('[data-feature-target]').forEach((button) => {
     button.addEventListener('click', () => openFeaturePage(button.dataset.featureTarget));
   });
-  // 待开发入口：卡片置灰但可点，点了给一句提示，不跳转
+  // 待开发入口：置灰但可点，点了给一句提示，不跳转
   document.querySelectorAll('[data-feature-coming-soon]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.preventDefault();
-      const label = button.dataset.featureComingSoon || '该功能';
-      showComingSoonToast(label + '功能正在开发中，敬请期待');
+      showComingSoonToast('该功能正在开发中，敬请期待');
     });
   });
   document.querySelectorAll('[data-feature-back]').forEach((button) => {

@@ -291,14 +291,6 @@
               </span>
               <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
             </button>
-            <button type="button" class="feature-entry-card feature-entry-violet feature-entry-locked" data-feature-coming-soon="配置文件生成">
-              <span class="feature-entry-icon"><span class="material-symbols-outlined">settings_suggest</span></span>
-              <span class="feature-entry-content">
-                <strong>配置文件生成<span class="feature-dev-badge">功能待开发</span></strong>
-                <small>基于拆解结果生成对应的配置文件，便于在测试环境一键套用</small>
-              </span>
-              <span class="material-symbols-outlined feature-entry-arrow">lock</span>
-            </button>
           </div>
         </div>
       </section>
@@ -593,6 +585,30 @@
               </div>
 
               <div id="autoGenResult" class="auto-gen-result hidden"></div>
+            </div>
+          </section>
+
+          <section class="sampling-channel-section config-gen-section" aria-labelledby="configGenTitle" style="margin-top:.85rem">
+            <div class="sampling-channel-heading">
+              <div>
+                <h3 id="configGenTitle"><span class="material-symbols-outlined">settings_suggest</span>配置文件生成</h3>
+                <p>基于采样通道梳理与拆解模板，生成可直接下发的配置文件，省去手工誊写。</p>
+              </div>
+              <span class="sampling-channel-badge config-gen-badge" id="configGenBadge">功能待开发</span>
+            </div>
+
+            <div class="config-gen-panel">
+              <div class="config-gen-placeholder">
+                <span class="config-gen-placeholder-icon"><span class="material-symbols-outlined">construction</span></span>
+                <div class="config-gen-placeholder-body">
+                  <strong>该功能正在开发中，敬请期待</strong>
+                  <small>上线后可在此按通道列表生成配置文件，并支持按项目单独保存版本。</small>
+                </div>
+              </div>
+              <button id="configGenBtn" type="button" class="config-gen-btn" data-feature-coming-soon="配置文件生成" title="该功能正在开发中，敬请期待">
+                <span class="material-symbols-outlined">lock</span>
+                <span>生成配置文件</span>
+              </button>
             </div>
           </section>
             </div>
@@ -1170,7 +1186,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="./config.js?v=2026100124"></script>
     <script src="./supabase-auth.js?v=2026100124"></script>
-    <script src="./app.js?v=20261031f"></script>
+    <script src="./app.js?v=20261031g"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
