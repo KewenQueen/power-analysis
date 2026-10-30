@@ -7164,6 +7164,100 @@ function bindEvents() {
       '不测项：电源前后级输入输出仅测一端（输入/输出，以负载输出为主）；电流非常小没必要采集的电流采集通道：如上拉电源/GPIO参考电源/有其他手段测量的小电流通道；',
     ].join('\n');
 
+    // SMPS 固定数据：[SMPS 名, PMIC, Type, Voltage (V)]（PMIC 在原模板里是跨行合并，这里已展开到每一行）
+    const SC_SMPS_LIBRARY = [
+      ['S1A', 'PMAR2130', '', '0P728'],
+      ['S2A', 'PMAR2130', '', '0P728'],
+      ['S3A', 'PMAR2130', '', '0P728'],
+      ['S4A', 'PMAR2130', '', '0P952'],
+      ['S5A', 'PMAR2130', '', '1P88'],
+      ['S6A', 'PMAR2130', '', '0P752'],
+      ['S7A', 'PMAR2130', '', '0P728'],
+      ['S8A', 'PMAR2130', '', '0P752'],
+      ['S9A', 'PMAR2130', '', '0P728'],
+      ['S10A', 'PMAR2130', '', '0P892'],
+      ['VBOB', 'RT6160A', '', ''],
+      ['MV_BUCK', 'KTB8399NEDAA-TR', '', '1P8'],
+      ['DEV_1P8', 'SGM6029CYG/TR', '', '1P8'],
+      ['VPH_PWR_BOOST_BYP', 'HL7603AWL05', '', '3P3'],
+      ['WLAN_0P9V', 'HL7594KWL09', '', '0P9'],
+      ['VBUCK_0P8', 'BES2800YP', '', '0P8'],
+      ['VBUCK_1P1', 'BES2800YP', '', '1P1'],
+      ['VBUCK_1P8', 'BES2800YP', '', '1P8'],
+      ['VCLASSD', 'BES2800YP', '', ''],
+    ];
+
+    // LDO 固定数据：[LDO 名, PMIC, Type, Voltage (V), V_In（DCDC）, Voltage (V), V_In (V), V_Out (V)]
+    const SC_LDO_LIBRARY = [
+      ['L1A', 'PMAR2130', '', '0P912V', 'S4A', '0P952', 0.952, 0.912],
+      ['L2A', 'PMAR2130', '', '3P08V', 'VBOB', '', 3.3, 3.08],
+      ['L3A', 'PMAR2130', '', '1P2V', 'MV_BUCK', '1P3', 1.3, 1.2],
+      ['L4A', 'PMAR2130', '', '1P25V', 'MV_BUCK', '1P3', 1.3, 1.25],
+      ['L5A', 'PMAR2130', '', '1P128V', 'MV_BUCK', '1P3', 1.3, 1.128],
+      ['L6A', 'PMAR2130', '', '0P6V', 'S10A', '0P892', 0.892, 0.6],
+      ['L7A', 'PMAR2130', '', '1P8V', 'S5A', '1P88', 1.88, 1.8],
+      ['L8A', 'PMAR2130', '', '0P88V', 'S5A', '1P88', 1.88, 0.88],
+      ['L9A', 'PMAR2130', '', '0P728V', 'S10A', '0P892', 0.892, 0.728],
+      ['L10A', 'PMAR2130', '', '2P952V', 'VBOB', '', 3.3, 2.952],
+      ['L11A', 'PMAR2130', '', '0P752V', 'S4A', '0P952', 0.952, 0.752],
+      ['L12A', 'PMAR2130', '', '1P8V', 'S5A', '1P88', 1.88, 1.8],
+      ['L13A', 'PMAR2130', '', '1P8V', 'VBOB', '', 3.3, 1.8],
+      ['L14A', 'PMAR2130', '', '1P8V', 'S5A', '1P88', 1.88, 1.8],
+      ['L15A', 'PMAR2130', '', '1P8V', 'S5A', '1P88', 1.88, 1.8],
+      ['L16A', 'PMAR2130', '', '', 'VBOB', '', 3.3, ''],
+      ['L17A', 'PMAR2130', '', '3P2V', 'VBOB', '', 3.3, 3.2],
+      ['L18A', 'PMAR2130', '', '1P2V', 'MV_BUCK', '1P3', 1.3, 1.2],
+      ['VMIC1', 'BES2800YP', '', '3P3', 'VPH', '', 3.8, 1.8],
+      ['VMIC2', 'BES2800YP', '', '3P3', 'VPH', '', 3.8, 1.8],
+      ['VUSB', 'BES2800YP', '', '', 'VPH', '', 3.8, 3.3],
+      ['VSENSOR', 'BES2800YP', '', '1P8', 'VPH', '', 3.8, 1.8],
+      ['CAM1_DVDD', 'SGM2045-1 #1', '', '1P1', 'MV_BUCK', '1P3', 1.3, 1.1],
+      ['CAM1_AVDD', 'SGM2045-1 #2', '', '2P8', 'VBOB', '', 3.3, 2.8],
+      ['CAM1_IOVDD', 'SGM2045-1 #3', '', '1P8', 'VBOB', '', 3.3, 1.8],
+      ['VSENSOR_2V8', 'SGM2045-1 #4', '', '2P8', 'VPH', '', 3.8, 2.8],
+      ['RF_SWITCH_VDD_1P8', 'SGM2045-1 #5', '', '1P8', 'VPH', '', 3.8, 1.8],
+    ];
+
+    // 模板里 7 个负载点（1/10/100/1000/2500/4000/10000 mA）的效率占位值都是 0.8，按实测再改
+    const SC_SMPS_LOADS = [1, 10, 100, 1000, 2500, 4000, 10000];
+    const SC_SMPS_DEFAULT_EFF = 0.8;
+
+    // 项目里的 rail 名（如 VREG_S9A_0P728V）与模板短名（如 S9A）对齐：命中名字最长的那个
+    function scMatchPowerLibrary(name, library) {
+      const key = String(name || '').trim().toUpperCase();
+      if (!key) return null;
+      let best = null;
+      let bestLength = 0;
+      library.forEach((item) => {
+        const libKey = String(item[0] || '').trim().toUpperCase();
+        if (!libKey || key.indexOf(libKey) === -1) return;
+        if (libKey.length > bestLength) {
+          best = item;
+          bestLength = libKey.length;
+        }
+      });
+      return best;
+    }
+
+    // 2_电源信息表 的行数据：项目里用到的 rail 优先（VLOOKUP 靠它命中），
+    // 命中模板行时把 PMIC / Type / Voltage 等固定数据带过来；模板剩余行按原顺序补在后面。
+    function scBuildPowerRows(names, library, fallbackLibrary) {
+      const rows = [];
+      const usedNames = new Set();
+      names.forEach((name) => {
+        // 先在本表（SMPS / LDO）里找，找不到再跨表找静态信息（如 VMIC1 在模板里挂在 LDO 区）
+        const match = scMatchPowerLibrary(name, library)
+          || (fallbackLibrary ? scMatchPowerLibrary(name, fallbackLibrary) : null);
+        if (match) usedNames.add(match[0]);
+        rows.push({ name: String(name || ''), lib: match });
+      });
+      library.forEach((item) => {
+        if (usedNames.has(item[0])) return;
+        rows.push({ name: item[0], lib: item });
+      });
+      return rows.length ? rows : [{ name: '', lib: null }];
+    }
+
     function scText(row, key) {
       const raw = row ? row[key] : '';
       return raw == null ? '' : String(raw).trim();
@@ -7232,11 +7326,6 @@ function bindEvents() {
             bold: !!st.bold,
             color: { argb: st.color || 'FF000000' },
           },
-          alignment: {
-            horizontal: st.h || 'center',
-            vertical: st.v || 'center',
-            wrapText: !!st.wrap,
-          },
         };
         if (st.fill) style.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: st.fill } };
         if (st.border) {
@@ -7262,11 +7351,17 @@ function bindEvents() {
             const dest = target.getCell(r + 1, c + 1);
             if (cell.f) dest.value = { formula: String(cell.f).replace(/^=/, '') };
             else if (cell.v !== undefined && cell.v !== null && cell.v !== '') dest.value = cell.v;
+            // 全表统一：水平居中 + 垂直居中
+            // （ExcelJS 的垂直居中值是 'middle'，写盘时会归一成 OOXML 的 vertical="center"）
+            dest.alignment = {
+              horizontal: 'center',
+              vertical: 'middle',
+              wrapText: !!(cell.st && cell.st.wrap),
+            };
             if (cell.st) {
               const style = toExcelStyle(cell.st);
               if (style.fill) dest.fill = style.fill;
               dest.font = style.font;
-              dest.alignment = style.alignment;
               if (style.border) dest.border = style.border;
             }
             if (cell.z) dest.numFmt = cell.z;
@@ -7338,13 +7433,17 @@ function bindEvents() {
       const modules = scUniqueValues(channels, 'module');
       const channelNames = channels.map((row) => scQepmChannelName(row)).filter(Boolean);
 
+      // 2_电源信息表 的行数据：项目 rail + 模板固定数据（DCDC / LDO 两个子表的全部行）
+      const smpsRowDefs = scBuildPowerRows(dcdcNames, SC_SMPS_LIBRARY, SC_LDO_LIBRARY);
+      const ldoRowDefs = scBuildPowerRows(ldoNames, SC_LDO_LIBRARY, SC_SMPS_LIBRARY);
+
       // 2_电源信息表 的行布局：3_功耗采集数据表 的 VLOOKUP 区间必须与之精确对齐
       const smpsFirst = 8;
-      const smpsLast = smpsFirst + Math.max(dcdcNames.length, 1) - 1;
+      const smpsLast = smpsFirst + smpsRowDefs.length - 1;
       const ldoTitleRow = smpsLast + 2;
       const ldoHeadRow = ldoTitleRow + 1;
       const ldoFirst = ldoHeadRow + 1;
-      const ldoLast = ldoFirst + Math.max(ldoNames.length, 1) - 1;
+      const ldoLast = ldoFirst + ldoRowDefs.length - 1;
       const smpsLookup = `'2_电源信息表'!$B$${smpsFirst}:$M$${smpsLast}`;
       const ldoLookup = `'2_电源信息表'!$B$${ldoFirst}:$I$${ldoLast}`;
       // 3_功耗采集数据表的整列区间（Power in Sum / Pavg / 模块 / 子模块）
@@ -7538,22 +7637,39 @@ function bindEvents() {
       put(infoGrid, 6, 12, 'Itotal in Current Case (mA)');
       put(infoGrid, 6, 13, 'Efficiency in Current Case');
       put(infoGrid, 6, 14, '备注');
-      [1, 10, 100, 1000, 2500, 4000, 10000].forEach((load, i) => put(infoGrid, 7, 5 + i, load));
-      const smpsRows = dcdcNames.length ? dcdcNames : [''];
-      smpsRows.forEach((name, i) => {
+      SC_SMPS_LOADS.forEach((load, i) => put(infoGrid, 7, 5 + i, load));
+      // SMPS 区：PMIC / Type / Voltage(V) 与各负载点效率来自模板固定数据，效率占位 0.8
+      smpsRowDefs.forEach((rowDef, i) => {
         const r = smpsFirst + i;
-        put(infoGrid, r, 2, name);
-        for (let c = 5; c <= 11; c++) put(infoGrid, r, c, 0.8);   // 默认效率 0.8，按实测改
+        const lib = rowDef.lib || [];
+        if (lib[1]) put(infoGrid, r, 1, lib[1]);                  // A PMIC
+        put(infoGrid, r, 2, rowDef.name);                          // B SMPS
+        if (lib[2]) put(infoGrid, r, 3, lib[2]);                  // C Type
+        if (lib[3]) put(infoGrid, r, 4, lib[3]);                  // D Voltage (V)
+        SC_SMPS_LOADS.forEach((_, index) => {
+          put(infoGrid, r, 5 + index, SC_SMPS_DEFAULT_EFF);
+        });
       });
 
       put(infoGrid, ldoTitleRow, 1, '3. LDO Information');
       ['PMIC', 'LDO', 'Type', 'Voltage (V)', 'V_In（DCDC）', 'Voltage (V)', 'V_In (V)', 'V_Out (V)', 'Efficiency (%)']
         .forEach((label, i) => put(infoGrid, ldoHeadRow, i + 1, label));
-      const ldoRows = ldoNames.length ? ldoNames : [''];
-      ldoRows.forEach((name, i) => put(infoGrid, ldoFirst + i, 2, name));
+      // LDO 区：PMIC / Type / Voltage(V) / V_In（DCDC）/ V_In / V_Out 同样取模板固定数据
+      ldoRowDefs.forEach((rowDef, i) => {
+        const r = ldoFirst + i;
+        const lib = rowDef.lib || [];
+        if (lib[1]) put(infoGrid, r, 1, lib[1]);                  // A PMIC
+        put(infoGrid, r, 2, rowDef.name);                          // B LDO
+        if (lib[2]) put(infoGrid, r, 3, lib[2]);                  // C Type
+        if (lib[3]) put(infoGrid, r, 4, lib[3]);                  // D Voltage (V)
+        if (lib[4]) put(infoGrid, r, 5, lib[4]);                  // E V_In（DCDC）
+        if (lib[5]) put(infoGrid, r, 6, lib[5]);                  // F Voltage (V)
+        if (lib[6] !== undefined && lib[6] !== '') put(infoGrid, r, 7, lib[6]);   // G V_In (V)
+        if (lib[7] !== undefined && lib[7] !== '') put(infoGrid, r, 8, lib[7]);   // H V_Out (V)
+      });
 
       const infoFormulas = [];
-      smpsRows.forEach((name, i) => {
+      smpsRowDefs.forEach((rowDef, i) => {
         const r = smpsFirst + i;
         // 该 SMPS 在实测数据里承担的电流合计（3 表 P = DCDC 名称，N = Iavg）
         infoFormulas.push({
@@ -7572,7 +7688,7 @@ function bindEvents() {
             + `${eff1}+(${eff2}-${eff1})*($L${r}-${load1})/(${load2}-${load1}))),$E${r})`,
         });
       });
-      ldoRows.forEach((name, i) => {
+      ldoRowDefs.forEach((rowDef, i) => {
         const r = ldoFirst + i;
         // LDO 效率 ≈ V_Out / V_In
         infoFormulas.push({ addr: 'I' + r, f: `IFERROR($H${r}/$G${r},1)` });
@@ -7732,14 +7848,20 @@ function bindEvents() {
       put(statGrid, detailTitleRow, 1, '2. 子模块明细（SUMIFS 汇总，含合计行）');
       ['模块', '子模块', '折算到电池端_mW', '负载端_mW', '负载端/电池端效率_%', '通道数']
         .forEach((label, i) => put(statGrid, detailHeadRow, i + 1, label));
+      // 「模块」列会按块纵向合并，合并后只有块首行有值，所以公式统一引用块首单元格（$A$块首行）
+      let moduleBlockStartRow = detailFirstRow;
       pairs.forEach((pair, i) => {
         const r = detailFirstRow + i;
-        put(statGrid, r, 1, pair[0] || '（未填写模块）');
+        const moduleLabel = pair[0] || '（未填写模块）';
+        const previousLabel = i > 0 ? (pairs[i - 1][0] || '（未填写模块）') : null;
+        if (i === 0 || moduleLabel !== previousLabel) moduleBlockStartRow = r;
+        const moduleRef = `$A$${moduleBlockStartRow}`;
+        put(statGrid, r, 1, moduleLabel);
         put(statGrid, r, 2, pair[1] || '（未填写子模块）');
-        statFormulas.push({ addr: `C${r}`, f: `SUMIFS(${rngW},${rngA},$A${r},${rngB},$B${r})` });
-        statFormulas.push({ addr: `D${r}`, f: `SUMIFS(${rngO},${rngA},$A${r},${rngB},$B${r})` });
+        statFormulas.push({ addr: `C${r}`, f: `SUMIFS(${rngW},${rngA},${moduleRef},${rngB},$B${r})` });
+        statFormulas.push({ addr: `D${r}`, f: `SUMIFS(${rngO},${rngA},${moduleRef},${rngB},$B${r})` });
         statFormulas.push({ addr: `E${r}`, f: `IFERROR(D${r}/C${r},0)` });
-        statFormulas.push({ addr: `F${r}`, f: `COUNTIFS(${rngA},$A${r},${rngB},$B${r})` });
+        statFormulas.push({ addr: `F${r}`, f: `COUNTIFS(${rngA},${moduleRef},${rngB},$B${r})` });
       });
       if (pairs.length) {
         const detailLastRow = detailFirstRow + pairs.length - 1;
@@ -7915,9 +8037,8 @@ function bindEvents() {
       setRowHeight(acqSheet, 2, 34);
       setRowHeight(acqSheet, 3, 22);
       acqSheet['!freeze'] = 'N4';
-      mergeRepeatedRows(acqSheet, 4, lastDataRow, 1, [1]);
-      mergeRepeatedRows(acqSheet, 4, lastDataRow, 2, [1, 2]);
-      mergeRepeatedRows(acqSheet, 4, lastDataRow, 3, [1, 2, 3]);
+      // 注意：3 表的 A/B 列不做纵向合并——4-统计 的 SUMIFS/COUNTIFS 要按「模块+子模块」逐行匹配，
+      // 合并后非块首行的值为空会统计不到；1-表（无公式）和 4-统计（仅展示）才做合并。
 
       // --- 4-统计：小节标题浅蓝、表头与数据浅绿 ---
       const statSheet = workbook.Sheets['4-统计'];
@@ -7937,6 +8058,8 @@ function bindEvents() {
       if (pairs.length) {
         const sumRow = statDetailLast + 1;
         styleRange(statSheet, sumRow, 1, sumRow, statLastCol, scStyle({ fill: SC_COLOR.green, bold: true }));
+        // 子模块明细的「模块」列按连续相同模块名纵向合并（与 1_电源配置表 的 A/B/C 列同一套逻辑）
+        mergeRepeatedRows(statSheet, 16, statDetailLast, 1, [1]);
       }
 
       // --- 5-测试原始数据 / 6-QEPM原始数据：只给表头加灰底，方便粘贴时对齐 ---
