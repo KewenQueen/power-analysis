@@ -5963,7 +5963,7 @@ function bindEvents() {
       },
       {
         id: 'priority_guide', title: '优先级说明', icon: 'priority_high',
-        content: '<ul><li><strong>必须</strong> — 关键器件的核心电源域，为必须采集项</li><li><strong>必须(QC)</strong> — 部分电源效率的电流采集通道，仅 QC 采集</li><li><strong>合并</strong> — 共同电源域的小电流采集通道，多路合并测量</li><li><strong>可选</strong> — 电流小且稳定的通道，通道冗余时可增加</li><li><strong>不测</strong> — 电流极小无需采集（如上拉电源 / GPIO 参考电源 / 有其他手段测量的通道）</li></ul>',
+        content: '<ul><li><strong>必须</strong> — 关键器件的核心电源域，为必须采集项</li><li><strong>合并</strong> — 共同电源域的小电流采集通道，多路合并测量</li><li><strong>可选</strong> — 电流小且稳定的通道，通道冗余时可增加</li><li><strong>不测</strong> — 电流极小无需采集（如上拉电源 / GPIO 参考电源 / 有其他手段测量的通道）</li></ul>',
       },
       {
         id: 'net_naming', title: 'NET 命名规则', icon: 'edit',
@@ -5988,7 +5988,6 @@ function bindEvents() {
       { key: 'resistor', label: '采样电阻' },
       { key: 'resistor_ref', label: '电阻位号' },
       { key: 'qc_channel', label: '采样通道QC' },
-      { key: 'ni_channel', label: '采样通道NI' },
       { key: 'dcdc_l1', label: '输入电源-1级_DCDC' },
       { key: 'ldo_l2', label: '输入电源-2级_LDO' },
       { key: 'remark', label: '备注' },
@@ -6034,15 +6033,8 @@ function bindEvents() {
     function getSamplingChannelOnlineCols() {
       if (customColumns === null) loadCustomColumns();
       const cols = (customColumns && customColumns.length > 0) ? customColumns.slice() : DEFAULT_COLUMNS.slice();
-      // Migration: older saved column sets do not include 「采样通道NI」. Insert it right
-      // after 「采样通道QC」 so imported/edited data always keeps the full 15+1 field set.
-      if (!cols.some((col) => col && col.key === 'ni_channel')) {
-        const qcIndex = cols.findIndex((col) => col && col.key === 'qc_channel');
-        const niCol = { key: 'ni_channel', label: '采样通道NI' };
-        if (qcIndex >= 0) cols.splice(qcIndex + 1, 0, niCol);
-        else cols.splice(Math.max(cols.length - 1, 0), 0, niCol);
-      }
-      return cols;
+      // Migration: 「采样通道NI」已下线，历史保存的列配置里若仍带有该列则剔除。
+      return cols.filter((col) => !(col && col.key === 'ni_channel'));
     }
 
     // ---------- Rules rendering ----------
@@ -6312,7 +6304,7 @@ function bindEvents() {
         const td = document.createElement('td');
         if (col.key === 'priority') {
           const select = document.createElement('select');
-          const options = ['', '必须', '必须(QC)', '合并', '可选', '不测'];
+          const options = ['', '必须', '合并', '可选', '不测'];
           for (const opt of options) {
             const optionEl = document.createElement('option');
             optionEl.value = opt;
@@ -6611,7 +6603,6 @@ function bindEvents() {
       { key: 'net_plus', test: (h) => /net\+/.test(h) },
       { key: 'net_minus', test: (h) => /net-/.test(h) || /net−/.test(h) },
       { key: 'qc_channel', test: (h) => /采样通道qc/.test(h) || /qc通道/.test(h) || /^qc/.test(h) },
-      { key: 'ni_channel', test: (h) => /采样通道ni/.test(h) || /ni通道/.test(h) || /^ni/.test(h) },
       { key: 'resistor_ref', test: (h) => /电阻位号|电阻编号|电阻标号|^位号|resistor(ref|no|id)/.test(h) },
       { key: 'resistor', test: (h) => /采样电阻|电阻选型|^电阻|阻值|resistor/.test(h) },
       { key: 'dcdc_l1', test: (h) => /dcdc/.test(h) },
@@ -6654,7 +6645,8 @@ function bindEvents() {
       if (!text) return '';
       const compact = text.replace(/\s+/g, '').replace(/[（）]/g, (m) => (m === '（' ? '(' : ')'));
       if (/不测|免测|不采集/.test(compact)) return '不测';
-      if (/必须\(qc\)|必测\(qc\)|必须\(QC\)/i.test(compact)) return '必须(QC)';
+      // 「必须(QC)」优先级已下线，历史数据统一归并为「必须」。
+      if (/必[须测]\(qc\)/i.test(compact)) return '必须';
       if (/合并/.test(compact)) return '合并';
       if (/必须|必测/.test(compact)) return '必须';
       if (/可选|选测/.test(compact)) return '可选';
@@ -7146,13 +7138,13 @@ function bindEvents() {
     const AUTO_GEN_PROJECT_KEY = 'sampling_channel_project_name_v1';
     const BREAKDOWN_SHEET_NAMES = ['0-封面', '1_电源配置表', '2_电源信息表', '3_功耗采集数据表', '4-统计', '5-测试原始数据', '6-QEPM原始数据', '附录-DOU测试场景'];
 
-    // 1_电源配置表 A-P
-    const POWER_CONFIG_HEADERS = ['模块', '子模块', 'tiny模块', 'power domain', '优先级', 'NET', '采样通道 NET+', '采样通道 NET-', '采样电阻', '电阻位号', '采样通道QC', '采样通道NI', '输入电源-1级_DCDC', '输入电源-2级_LDO', '备注', '原理图CHECK'];
-    const POWER_CONFIG_FIELDS = ['module', 'sub_module', 'tiny_module', 'power_domain', 'priority', 'net', 'net_plus', 'net_minus', 'resistor', 'resistor_ref', 'qc_channel', 'ni_channel', 'dcdc_l1', 'ldo_l2', 'remark', 'schematic_check'];
+    // 1_电源配置表 A-O（15 列）
+    const POWER_CONFIG_HEADERS = ['模块', '子模块', 'tiny模块', 'power domain', '优先级', 'NET', '采样通道 NET+', '采样通道 NET-', '采样电阻', '电阻位号', '采样通道QC', '输入电源-1级_DCDC', '输入电源-2级_LDO', '备注', '原理图CHECK'];
+    const POWER_CONFIG_FIELDS = ['module', 'sub_module', 'tiny_module', 'power_domain', 'priority', 'net', 'net_plus', 'net_minus', 'resistor', 'resistor_ref', 'qc_channel', 'dcdc_l1', 'ldo_l2', 'remark', 'schematic_check'];
 
-    // 3_功耗采集数据表 A-X（24 列，含 4 个待计算的功率列）
-    const ACQ_HEADERS = ['模块', '子模块', 'tiny模块', 'power domain', '优先级', '采样通道', '采样通道 NET+', '采样通道 NET-', '采样电阻\n_mΩ', '电阻编号', '采样通道\nQC', '采样通道\nNI', '采样通道编号\n（QEPM）', '模块', '子模块', 'tiny模块', '输入电源-1级_DCDC', 'Efficiency', '输入电源-2级_LDO', 'Efficiency', 'Total\nEfficiency', 'Power @VBATT\nmW', 'Include \nin Sum?', 'Power in Sum\n(mW)'];
-    const ACQ_SUB_HEADERS = ['', '子模块', 'tiny模块', 'power domain', '', '', '', '采样电阻\nmΩ', '电阻选型', '电阻编号', '采样通道', '采样通道', '', 'Vavg(V)', 'Iavg(mA)', 'Pavg(mW)', 'DCDC', 'Efficiency', 'LDO', 'Efficiency', '', '', '', ''];
+    // 3_功耗采集数据表 A-W（23 列，含 4 个待计算的功率列）
+    const ACQ_HEADERS = ['模块', '子模块', 'tiny模块', 'power domain', '优先级', '采样通道', '采样通道 NET+', '采样通道 NET-', '采样电阻\n_mΩ', '电阻编号', '采样通道\nQC', '采样通道编号\n（QEPM）', '模块', '子模块', 'tiny模块', '输入电源-1级_DCDC', 'Efficiency', '输入电源-2级_LDO', 'Efficiency', 'Total\nEfficiency', 'Power @VBATT\nmW', 'Include \nin Sum?', 'Power in Sum\n(mW)'];
+    const ACQ_SUB_HEADERS = ['', '子模块', 'tiny模块', 'power domain', '', '', '', '采样电阻\nmΩ', '电阻选型', '电阻编号', '采样通道', '', 'Vavg(V)', 'Iavg(mA)', 'Pavg(mW)', 'DCDC', 'Efficiency', 'LDO', 'Efficiency', '', '', '', ''];
 
     const POWER_CONFIG_NOTES = [
       '通道设计原则：',
@@ -7160,7 +7152,6 @@ function bindEvents() {
       '2、QC相比NI采样通道更多，有些电源效率的采集通道仅配置在QC采集通道上；',
       '3、受布板面积以及走线限制，有些电源网络无法采集，根据实际走线情况调整布局；',
       '必测项：关键器件的核心电源域为必须采集项',
-      '必测项(QC)：部分电源效率的电流采集通道',
       '合并项：共同电源域的小电流采集通道',
       '可选项：电流小且稳定的电流采集通道，在有通道冗余时可选择增加通道；',
       '不测项：电源前后级输入输出仅测一端（输入/输出，以负载输出为主）；电流非常小没必要采集的电流采集通道：如上拉电源/GPIO参考电源/有其他手段测量的小电流通道；',
@@ -7273,8 +7264,8 @@ function bindEvents() {
       });
       workbook.SheetNames.push('1_电源配置表');
       workbook.Sheets['1_电源配置表'] = scSheetFromAoa(configAoa, {
-        cols: [{ wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 24 }, { wch: 26 }, { wch: 26 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 12 }],
-        merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 15 } }],
+        cols: [{ wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 24 }, { wch: 26 }, { wch: 26 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 18 }, { wch: 18 }, { wch: 20 }],
+        merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 14 } }],
       });
 
       // ---------- 2_电源信息表 ----------
@@ -7318,7 +7309,6 @@ function bindEvents() {
           scSheetValue(row, 'resistor'),
           scSheetValue(row, 'resistor_ref'),
           scSheetValue(row, 'qc_channel'),
-          scSheetValue(row, 'ni_channel'),
           scQepmChannelName(row),
           '', '', '',
           scSheetValue(row, 'dcdc_l1'), '', scSheetValue(row, 'ldo_l2'), '',
@@ -7327,8 +7317,8 @@ function bindEvents() {
       });
       workbook.SheetNames.push('3_功耗采集数据表');
       workbook.Sheets['3_功耗采集数据表'] = scSheetFromAoa(acqAoa, {
-        cols: [{ wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 10 }, { wch: 12 }, { wch: 13 }, { wch: 16 }, { wch: 22 }, { wch: 11 }, { wch: 11 }, { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 13 }, { wch: 14 }, { wch: 13 }, { wch: 14 }],
-        merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 23 } }],
+        cols: [{ wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 10 }, { wch: 12 }, { wch: 13 }, { wch: 22 }, { wch: 11 }, { wch: 11 }, { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 13 }, { wch: 14 }, { wch: 13 }, { wch: 14 }],
+        merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 22 } }],
       });
 
       // ---------- 4-统计 ----------
