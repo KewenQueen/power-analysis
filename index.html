@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=20261030d" />
+    <link rel="stylesheet" href="./style.css?v=20261031a" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -405,11 +405,16 @@
               <article class="sampling-channel-card">
                 <span class="sampling-channel-icon"><span class="material-symbols-outlined">cloud</span></span>
                 <div>
-                  <strong>云文档导入 <span class="sc-soon-tag">功能开发中</span></strong>
-                  <small>粘贴飞书云文档或电子表格链接（暂不解析）</small>
+                  <strong>云文档导入</strong>
+                  <small>粘贴飞书电子表格链接，在线取数并自动识别表头</small>
                 </div>
-                <input id="samplingChannelCloudUrl" type="url" placeholder="https://..." aria-label="采样通道云文档链接" />
-                <button type="button" class="template-btn template-btn-secondary" disabled><span class="material-symbols-outlined">lock</span>功能开发中</button>
+                <small id="samplingChannelCloudStatus" class="sc-import-status"></small>
+                <input id="samplingChannelCloudUrl" type="url" placeholder="https://xxx.larkoffice.com/sheets/..." aria-label="采样通道云文档链接" />
+                <div id="samplingChannelCloudSheetPicker" class="sc-sheet-picker hidden">
+                  <label for="samplingChannelCloudSheetSelect">读取工作表</label>
+                  <select id="samplingChannelCloudSheetSelect"></select>
+                </div>
+                <button id="samplingChannelCloudImportBtn" type="button" class="template-btn sc-cloud-import-btn"><span class="material-symbols-outlined">cloud_download</span><span class="sc-cloud-import-label">导入</span></button>
               </article>
               <article class="sampling-channel-card">
                 <span class="sampling-channel-icon"><span class="material-symbols-outlined">upload_file</span></span>
@@ -1155,7 +1160,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="./config.js?v=2026100124"></script>
     <script src="./supabase-auth.js?v=2026100124"></script>
-    <script src="./app.js?v=20261030c"></script>
+    <script src="./app.js?v=20261031a"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

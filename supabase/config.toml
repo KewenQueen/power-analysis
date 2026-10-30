@@ -1,2 +1,7 @@
 [functions.lark-sheet-export]
 verify_jwt = true
+
+# 云文档导入代理：游客模式下也需要调用，因此不强制 JWT。
+# 读取范围受限于「飞书应用被授权访问」的文档，且只提供只读接口。
+[functions.feishu-sheet-proxy]
+verify_jwt = false

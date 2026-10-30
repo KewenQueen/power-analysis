@@ -6776,6 +6776,32 @@ function bindEvents() {
       statusEl.dataset.tone = tone || '';
     }
 
+    // Shared by local + cloud import: asks replace/append, then persists & repaints.
+    // Returns the applied mode ('replace' | 'append') or null when the user cancels
+    // the overwrite prompt and nothing should be applied.
+    function applyParsedChannelRows(parsedRows, options) {
+      const opts = options || {};
+      let mode = 'replace';
+      const existing = state.samplingChannelOnlineRows.length;
+      if (existing > 0) {
+        mode = window.confirm(
+          '解析到 ' + parsedRows.length + ' 条通道记录' +
+          (opts.sourceLabel ? '（来源：' + opts.sourceLabel + '）' : '') + '。\n\n' +
+          '点击「确定」= 覆盖当前 ' + existing + ' 行数据\n' +
+          '点击「取消」= 追加到当前数据之后'
+        ) ? 'replace' : 'append';
+      }
+      state.samplingChannelOnlineRows = mode === 'replace'
+        ? parsedRows
+        : state.samplingChannelOnlineRows.concat(parsedRows);
+      saveSamplingChannelOnlineDraft();
+      renderAllSamplingChannelOnlineRows();
+      renderChannelPreview();
+      updateSamplingChannelSectionBadge();
+      updateAutoGenAvailability();
+      return mode;
+    }
+
     async function handleSamplingChannelLocalFile(file) {
       if (!file) return;
       if (els.samplingChannelLocalFileName) {
@@ -6801,23 +6827,7 @@ function bindEvents() {
           throw new Error('在「' + best.sheetName + '」中识别到表头，但未解析到有效通道数据');
         }
 
-        let mode = 'replace';
-        const existing = state.samplingChannelOnlineRows.length;
-        if (existing > 0) {
-          mode = window.confirm(
-            '解析到 ' + parsedRows.length + ' 条通道记录（来源 Sheet：' + best.sheetName + '）。\n\n' +
-            '点击「确定」= 覆盖当前 ' + existing + ' 行数据\n' +
-            '点击「取消」= 追加到当前数据之后'
-          ) ? 'replace' : 'append';
-        }
-        state.samplingChannelOnlineRows = mode === 'replace'
-          ? parsedRows
-          : state.samplingChannelOnlineRows.concat(parsedRows);
-        saveSamplingChannelOnlineDraft();
-        renderAllSamplingChannelOnlineRows();
-        renderChannelPreview();
-        updateSamplingChannelSectionBadge();
-        updateAutoGenAvailability();
+        const mode = applyParsedChannelRows(parsedRows, { sourceLabel: best.sheetName });
 
         setLocalImportStatus(
           '已从「' + best.sheetName + '」解析 ' + parsedRows.length + ' 条通道' + (mode === 'append' ? '（追加）' : ''),
@@ -6831,6 +6841,208 @@ function bindEvents() {
         if (els.samplingChannelLocalFile) els.samplingChannelLocalFile.value = '';
       }
     }
+
+    // ================================================================
+    // 采样通道梳理 —— 云文档导入（Supabase Edge Function 代理飞书取数）
+    // ================================================================
+    // The browser never sees the Feishu app secret: the Edge Function exchanges
+    // FEISHU_APP_ID / FEISHU_APP_SECRET for a tenant token server-side and returns a
+    // plain string matrix, which reuses the exact same parsing path as local files.
+    const CLOUD_IMPORT_TIMEOUT_MS = 30000;
+    const cloudImportState = { token: '', sheetId: '', sheets: [], busy: false };
+
+    function setCloudImportStatus(text, tone, hint) {
+      const statusEl = document.getElementById('samplingChannelCloudStatus');
+      if (!statusEl) return;
+      statusEl.textContent = text;
+      statusEl.dataset.tone = tone || '';
+      if (hint) statusEl.title = hint;
+      else statusEl.removeAttribute('title');
+    }
+
+    function setCloudImportBusy(busy) {
+      const button = document.getElementById('samplingChannelCloudImportBtn');
+      if (!button) return;
+      button.disabled = !!busy;
+      button.classList.toggle('is-busy', !!busy);
+      const label = button.querySelector('.sc-cloud-import-label');
+      if (label) label.textContent = busy ? '读取中…' : '导入';
+    }
+
+    function getCloudProxyEndpoint() {
+      const cfg = window.POWER_ANALYSIS_CONFIG || {};
+      if (cfg.feishuSheetProxyEndpoint) return String(cfg.feishuSheetProxyEndpoint).trim();
+      if (cfg.supabaseUrl) return String(cfg.supabaseUrl).replace(/\/+$/, '') + '/functions/v1/feishu-sheet-proxy';
+      return '';
+    }
+
+    // Accepts a full Feishu/Lark sheet URL or a bare spreadsheet token.
+    // Returns { token, sheetId } or { error } describing why it could not parse.
+    function parseCloudDocLink(rawValue) {
+      const raw = String(rawValue == null ? '' : rawValue).trim();
+      if (!raw) return { error: 'EMPTY' };
+      if (/^[A-Za-z0-9]{16,}$/.test(raw)) return { token: raw, sheetId: '' };
+      let url;
+      try {
+        url = new URL(/^https?:\/\//i.test(raw) ? raw : 'https://' + raw);
+      } catch {
+        return { error: 'INVALID' };
+      }
+      const path = url.pathname || '';
+      if (/\/wiki\//.test(path)) return { error: 'WIKI' };
+      const match = path.match(/\/(?:sheets|spreadsheets|base)\/([A-Za-z0-9]{10,})/);
+      if (!match) return { error: 'INVALID' };
+      const sheetId = url.searchParams.get('sheet') || url.searchParams.get('sheetId') || '';
+      return { token: match[1], sheetId };
+    }
+
+    async function callFeishuSheetProxy(payload) {
+      const endpoint = getCloudProxyEndpoint();
+      if (!endpoint) throw Object.assign(new Error('未配置云文档代理地址'), { code: 'PROXY_NOT_CONFIGURED' });
+      const cfg = window.POWER_ANALYSIS_CONFIG || {};
+      const headers = { 'content-type': 'application/json' };
+      if (cfg.feishuSheetProxyToken) headers['x-proxy-token'] = String(cfg.feishuSheetProxyToken);
+      const controller = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), CLOUD_IMPORT_TIMEOUT_MS) : null;
+      let response;
+      try {
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+          signal: controller ? controller.signal : undefined,
+        });
+      } catch (error) {
+        const isAbort = error && error.name === 'AbortError';
+        throw Object.assign(
+          new Error(isAbort ? '云文档服务响应超时，请稍后重试' : '无法连接云文档服务（网络异常或请求被拦截）'),
+          { code: 'NETWORK' }
+        );
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+      const text = await response.text().catch(() => '');
+      let data = null;
+      if (text) {
+        try { data = JSON.parse(text); } catch { data = null; }
+      }
+      if (!response.ok || !data || data.ok !== true) {
+        const message = (data && (data.message || data.error)) || ('云文档服务返回 HTTP ' + response.status);
+        throw Object.assign(new Error(message), {
+          code: (data && data.code) || ('HTTP_' + response.status),
+          hint: (data && data.hint) || '',
+          status: response.status,
+        });
+      }
+      return data;
+    }
+
+    function describeCloudImportError(error) {
+      const code = error && error.code;
+      switch (code) {
+        case 'EMPTY':
+          return '请先粘贴飞书电子表格链接';
+        case 'WIKI':
+          return '知识库链接无法直接取数，请在飞书中「在电子表格中打开」后复制 /sheets/ 链接';
+        case 'INVALID':
+        case 'INVALID_URL':
+          return '链接格式无法识别，请粘贴电子表格链接（…/sheets/xxxx）';
+        case 'PROXY_NOT_CONFIGURED':
+          return '云文档服务尚未配置飞书应用凭证，请改用本地文档导入';
+        case 'PROXY_TOKEN_INVALID':
+          return '云文档服务校验失败（代理访问口令不匹配）';
+        case 'FEISHU_CREDENTIAL_INVALID':
+          return '飞书应用凭证无效，请检查 FEISHU_APP_ID / FEISHU_APP_SECRET';
+        case 'FEISHU_FORBIDDEN':
+          return '飞书应用无权访问该文档，请把应用的机器人加为文档协作者后重试';
+        case 'FEISHU_NOT_FOUND':
+          return '未找到该文档或工作表，请确认链接与所选工作表';
+        case 'NOT_FOUND':
+        case 'HTTP_404':
+          return '云文档服务暂不可用，请在飞书导出 Excel 后用本地文档导入';
+        case 'EMPTY_SHEET':
+          return '该工作表中没有可读取的数据';
+        case 'NO_HEADER':
+          return '未识别到采样通道表头，可切换下方工作表重试';
+        case 'NO_ROWS':
+          return '识别到表头但未解析到有效通道数据';
+        default:
+          return (error && error.message) ? error.message : '云文档导入失败';
+      }
+    }
+
+    function renderCloudSheetPicker(sheets, selectedSheetId) {
+      const wrap = document.getElementById('samplingChannelCloudSheetPicker');
+      const select = document.getElementById('samplingChannelCloudSheetSelect');
+      if (!wrap || !select) return;
+      const visible = (Array.isArray(sheets) ? sheets : []).filter((sheet) => sheet && !sheet.hidden && sheet.sheetId);
+      if (visible.length <= 1) {
+        wrap.classList.add('hidden');
+        select.innerHTML = '';
+        return;
+      }
+      select.innerHTML = visible.map((sheet) => (
+        '<option value="' + escapeHtml(sheet.sheetId) + '">' + escapeHtml(sheet.title || sheet.sheetId) + '</option>'
+      )).join('');
+      const target = visible.find((sheet) => sheet.sheetId === selectedSheetId);
+      select.value = (target || visible[0]).sheetId;
+      wrap.classList.remove('hidden');
+    }
+
+    async function importSamplingChannelCloudDoc(options) {
+      const opts = options || {};
+      if (cloudImportState.busy) return;
+      const direct = opts.spreadsheetToken
+        ? { token: opts.spreadsheetToken, sheetId: opts.sheetId || '' }
+        : parseCloudDocLink(document.getElementById('samplingChannelCloudUrl')?.value || '');
+      if (direct.error || !direct.token) {
+        setCloudImportStatus(describeCloudImportError({ code: direct.error || 'EMPTY' }), 'error');
+        const input = document.getElementById('samplingChannelCloudUrl');
+        if (input && (direct.error === 'EMPTY' || !direct.error)) input.focus();
+        return;
+      }
+      // Re-importing the same link honours the sheet picked in the dropdown.
+      const sheetPicker = document.getElementById('samplingChannelCloudSheetPicker');
+      const sheetSelect = document.getElementById('samplingChannelCloudSheetSelect');
+      const pickedSheetId = (!opts.spreadsheetToken && sheetPicker && !sheetPicker.classList.contains('hidden')
+        && cloudImportState.token === direct.token && sheetSelect && sheetSelect.value) ? sheetSelect.value : '';
+      const targetSheetId = pickedSheetId || direct.sheetId || '';
+
+      cloudImportState.busy = true;
+      setCloudImportBusy(true);
+      setCloudImportStatus('正在读取云文档…', 'loading');
+      try {
+        const payload = { action: 'read', spreadsheetToken: direct.token };
+        if (targetSheetId) payload.sheetId = targetSheetId;
+        const data = await callFeishuSheetProxy(payload);
+        const values = Array.isArray(data.values) ? data.values : [];
+        const sheetMeta = data.sheet || {};
+        cloudImportState.token = direct.token;
+        cloudImportState.sheetId = sheetMeta.sheetId || direct.sheetId || '';
+        cloudImportState.sheets = Array.isArray(data.sheets) ? data.sheets : [];
+        renderCloudSheetPicker(cloudImportState.sheets, cloudImportState.sheetId);
+
+        if (!values.length) throw Object.assign(new Error('empty'), { code: 'EMPTY_SHEET' });
+        const header = detectChannelHeaderRow(values);
+        if (!header) throw Object.assign(new Error('no header'), { code: 'NO_HEADER' });
+        const parsedRows = buildChannelRowsFromMatrix(values, header.rowIndex, header.map);
+        if (!parsedRows.length) throw Object.assign(new Error('no rows'), { code: 'NO_ROWS' });
+
+        const sheetTitle = sheetMeta.title || '云文档';
+        const mode = applyParsedChannelRows(parsedRows, { sourceLabel: sheetTitle });
+        setCloudImportStatus(
+          '已从「' + sheetTitle + '」导入 ' + parsedRows.length + ' 条通道' + (mode === 'append' ? '（追加）' : ''),
+          'success'
+        );
+      } catch (error) {
+        console.error(error);
+        setCloudImportStatus('导入失败：' + describeCloudImportError(error), 'error', error && error.hint);
+      } finally {
+        cloudImportState.busy = false;
+        setCloudImportBusy(false);
+      }
+    }
+
 
     // ================================================================
     // 采样通道梳理 —— 通道列表预览 + 优先级统计
@@ -7270,6 +7482,31 @@ function bindEvents() {
         if (file) handleSamplingChannelLocalFile(file);
       });
     }
+
+    // Cloud document import wiring (Feishu sheet -> Edge Function proxy).
+    (function initCloudImport() {
+      const urlInput = document.getElementById('samplingChannelCloudUrl');
+      const importBtn = document.getElementById('samplingChannelCloudImportBtn');
+      const sheetPicker = document.getElementById('samplingChannelCloudSheetPicker');
+      const sheetSelect = document.getElementById('samplingChannelCloudSheetSelect');
+      if (importBtn) importBtn.addEventListener('click', () => importSamplingChannelCloudDoc());
+      if (urlInput) {
+        urlInput.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          importSamplingChannelCloudDoc();
+        });
+        // A new link invalidates the sheet list read from the previous document.
+        urlInput.addEventListener('input', () => {
+          if (cloudImportState.busy) return;
+          if (sheetPicker) sheetPicker.classList.add('hidden');
+          if (sheetSelect) sheetSelect.innerHTML = '';
+          cloudImportState.token = '';
+          cloudImportState.sheetId = '';
+          setCloudImportStatus('', '');
+        });
+      }
+    })();
 
     // Load saved draft
     loadSamplingChannelOnlineDraft();

@@ -2861,6 +2861,45 @@ body.is-admin .dpdb-admin-action { display: inline-flex !important; }
 .sc-import-status[data-tone="loading"] { color: #0369a1; }
 .sc-import-status[data-tone="success"] { color: #047857; font-weight: 700; }
 .sc-import-status[data-tone="error"] { color: #b91c1c; }
+
+/* 云文档导入 */
+.sc-cloud-import-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .3rem;
+  height: 36px;
+  background: linear-gradient(135deg, #4f46e5 0%, #2563eb 100%);
+  color: #fff;
+  border: 1px solid transparent;
+  box-shadow: 0 4px 10px rgba(79, 70, 229, .18);
+}
+.sc-cloud-import-btn:hover:not(:disabled) { filter: brightness(1.05); box-shadow: 0 6px 14px rgba(79, 70, 229, .24); }
+.sampling-channel-card .sc-cloud-import-btn:disabled {
+  cursor: progress;
+  background: linear-gradient(135deg, #a5b4fc 0%, #93c5fd 100%);
+  color: #fff;
+  border: 1px solid transparent;
+  opacity: .9;
+  filter: none;
+}
+.sc-cloud-import-btn .material-symbols-outlined { font-size: .95rem; }
+.sc-sheet-picker { display: flex; align-items: center; gap: .4rem; }
+.sc-sheet-picker.hidden { display: none; }
+.sc-sheet-picker label { flex: 0 0 auto; color: #475569; font-size: .7rem; font-weight: 700; }
+.sc-sheet-picker select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: .65rem;
+  padding: 0 .55rem;
+  background: #fff;
+  color: #0f172a;
+  font-size: .72rem;
+  outline: none;
+}
+.sc-sheet-picker select:focus { border-color: #38bdf8; box-shadow: 0 0 0 3px rgba(56, 189, 248, .12); }
 .sampling-channel-badge.is-filled { background: #dcfce7; color: #15803d; }
 
 .sc-preview {
@@ -2905,8 +2944,8 @@ body.is-admin .dpdb-admin-action { display: inline-flex !important; }
 .sc-stat-must { background: #fee2e2; color: #b91c1c; }
 .sc-stat-merge { background: #ede9fe; color: #6d28d9; }
 .sc-stat-optional { background: #fef3c7; color: #b45309; }
-.sc-stat-skip { background: #f1f5f9; color: #64748b; }
-.sc-stat-muted { background: #f8fafc; color: #94a3b8; }
+.sc-stat-skip { background: #f1f5f9; color: #556274; }
+.sc-stat-muted { background: #cbd5e1; color: #334155; }
 
 .sc-preview-table-wrap {
   margin-top: .6rem;
@@ -2914,6 +2953,9 @@ body.is-admin .dpdb-admin-action { display: inline-flex !important; }
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: #93c5fd #f0f9ff;
+  /* 右侧渐隐提示「还有更多列」，末列留出内边距避免文字被裁切 */
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 44px), rgba(0, 0, 0, .1));
+  mask-image: linear-gradient(to right, #000 calc(100% - 44px), rgba(0, 0, 0, .1));
   border: 1px solid #e2e8f0;
   border-radius: .6rem;
 }
@@ -2949,7 +2991,11 @@ body.is-admin .dpdb-admin-action { display: inline-flex !important; }
 }
 .sc-preview-table tbody tr:nth-child(even) td { background: #fcfdff; }
 .sc-preview-table tbody tr:hover td { background: #f0f9ff; }
-.sc-preview-table th:last-child, .sc-preview-table td:last-child { padding-right: 1rem; }
+.sc-preview-table th:last-child, .sc-preview-table td:last-child { padding-right: 2.25rem; }
+.sc-preview-table-wrap::-webkit-scrollbar { height: 8px; width: 8px; }
+.sc-preview-table-wrap::-webkit-scrollbar-track { background: #f0f9ff; border-radius: 999px; }
+.sc-preview-table-wrap::-webkit-scrollbar-thumb { background: #93c5fd; border-radius: 999px; }
+.sc-preview-table-wrap::-webkit-scrollbar-thumb:hover { background: #60a5fa; }
 .sc-preview-empty { color: #cbd5e1; }
 .sc-preview-table .sc-preview-idx {
   position: sticky;
