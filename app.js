@@ -1,4 +1,4 @@
-/* global Chart, Papa, XlsxPopulate */
+/* global Chart, Papa, XlsxPopulate, ExcelJS */
 
 // ---------- Supabase data API ----------
 async function getSupabaseClient() {
@@ -6756,6 +6756,12 @@ function bindEvents() {
         // Guard against summary / footer rows (合计、总计、Total…).
         if (/^(合计|总计|小计|汇总|总功耗|total|sum)/i.test(row.module)
           || /^(合计|总计|小计|汇总|总功耗|total|sum)/i.test(row.power_domain)) continue;
+        // 原模板「模块 / 子模块 / tiny模块」是纵向合并单元格，只有块首行有值。
+        // 这里把合并块的语义还原成“向下填充”，否则 4-统计 的 SUMIFS 会漏掉这些通道。
+        const previous = out.length ? out[out.length - 1] : null;
+        ['module', 'sub_module', 'tiny_module'].forEach((key) => {
+          if (!row[key] && previous && previous[key]) row[key] = previous[key];
+        });
         out.push(row);
       }
       return out;
@@ -7208,6 +7214,100 @@ function bindEvents() {
       return safe + '_功耗拆解数据处理模板_' + ds + '.xlsx';
     }
 
+    // 写文件：SheetJS 社区版（xlsx@0.18.5）不写样式，所以样式导出走 ExcelJS；
+    // 读取/解析仍然用 SheetJS 与 xlsx-populate。这里把 buildBreakdownWorkbook 产出的
+    // 工作表（含 st 样式描述、!merges、!cols、!rows、!freeze）翻译成 ExcelJS 工作簿。
+    async function scWriteWorkbookWithStyle(workbook, fileName) {
+      const Library = typeof ExcelJS !== 'undefined' ? ExcelJS : null;
+      if (!Library || !Library.Workbook) {
+        XLSX.writeFile(workbook, fileName, { compression: true });
+        return { styled: false, size: 0 };
+      }
+      const SC_THIN = { style: 'thin' };
+      const toExcelStyle = (st) => {
+        const style = {
+          font: {
+            name: st.name || '宋体',
+            size: st.size || 10,
+            bold: !!st.bold,
+            color: { argb: st.color || 'FF000000' },
+          },
+          alignment: {
+            horizontal: st.h || 'center',
+            vertical: st.v || 'center',
+            wrapText: !!st.wrap,
+          },
+        };
+        if (st.fill) style.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: st.fill } };
+        if (st.border) {
+          style.border = { top: SC_THIN, left: SC_THIN, bottom: SC_THIN, right: SC_THIN };
+        }
+        return style;
+      };
+
+      const out = new Library.Workbook();
+      // 打开时强制重算，公式单元格没有缓存值也能立刻出结果
+      out.calcProperties = out.calcProperties || {};
+      out.calcProperties.fullCalcOnLoad = true;
+
+      workbook.SheetNames.forEach((name) => {
+        const source = workbook.Sheets[name];
+        const target = out.addWorksheet(name);
+        if (!source || !source['!ref']) return;
+        const range = XLSX.utils.decode_range(source['!ref']);
+        for (let r = range.s.r; r <= range.e.r; r++) {
+          for (let c = range.s.c; c <= range.e.c; c++) {
+            const cell = source[XLSX.utils.encode_cell({ r, c })];
+            if (!cell) continue;
+            const dest = target.getCell(r + 1, c + 1);
+            if (cell.f) dest.value = { formula: String(cell.f).replace(/^=/, '') };
+            else if (cell.v !== undefined && cell.v !== null && cell.v !== '') dest.value = cell.v;
+            if (cell.st) {
+              const style = toExcelStyle(cell.st);
+              if (style.fill) dest.fill = style.fill;
+              dest.font = style.font;
+              dest.alignment = style.alignment;
+              if (style.border) dest.border = style.border;
+            }
+            if (cell.z) dest.numFmt = cell.z;
+          }
+        }
+        (source['!cols'] || []).forEach((col, index) => {
+          if (col && col.wch) target.getColumn(index + 1).width = col.wch;
+        });
+        (source['!rows'] || []).forEach((row, index) => {
+          if (row && row.hpt) target.getRow(index + 1).height = row.hpt;
+        });
+        (source['!merges'] || []).forEach((merge) => {
+          try {
+            target.mergeCells(merge.s.r + 1, merge.s.c + 1, merge.e.r + 1, merge.e.c + 1);
+          } catch (error) {
+            console.warn('merge skipped', name, error && error.message);
+          }
+        });
+        if (source['!freeze']) {
+          try {
+            const anchor = XLSX.utils.decode_cell(source['!freeze']);
+            target.views = [{ state: 'frozen', xSplit: anchor.c, ySplit: anchor.r, topLeftCell: source['!freeze'] }];
+          } catch (error) {
+            console.warn('freeze skipped', name, error && error.message);
+          }
+        }
+      });
+
+      const buffer = await out.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      return { styled: true, size: blob.size };
+    }
+
     function buildQepmSheetAoa(channelNames) {
       const parts = [['', 'Start Time:', '', 'Duration:', '', 'Time Precision:', '', 'Time Adjustment:', '', 'Target Size:', '']];
       parts.push([]);
@@ -7285,6 +7385,104 @@ function bindEvents() {
         const target = grid[r - 1];
         while (target.length < c) target.push(null);
         target[c - 1] = value;
+      };
+
+      // ---------- 样式层：按原模板 DoraG_功耗拆解数据处理模板V1.0.xlsx 的取色还原 ----------
+      // 原模板用到的主题色/填充色（openpyxl 从 xl/styles.xml 读出的 ARGB）
+      const SC_COLOR = {
+        teal: 'FF00D6B9',        // A/B/C 模块区
+        yellow: 'FFFFF2CC',      // 需要人工填写的输入区
+        green: 'FFC6DEB5',       // 公式计算区（效率）
+        orange: 'FFFBE5D6',      // LDO 电压输入区
+        channelA: 'FF00B0F0',    // 采样通道号码
+        channelB: 'FF14C0FF',    // 采样通道 NET-
+        channelAlt: 'FFB3D600',  // 相邻板卡/模块分组的交替色
+        headerGray: 'FFD0CFCF',  // 3 表表头
+        headerBlue: 'FFE1EAFF',  // 1 表表头
+        sectionBlue: 'FFB4C7E7', // 4 表小节标题
+        gray: 'FFBFBFBF',        // 2 表表头
+        red: 'FFFF0000',         // 2 表 SMPS 小节标题
+        white: 'FFFFFFFF',
+        black: 'FF000000',
+        fontDark: 'FF1F2329',
+      };
+
+      // 单元格样式描述（自定义 st 字段，写文件时翻译成 xlsx-populate 的 style 对象）
+      const scStyle = (options) => ({
+        fill: options.fill || '',
+        bold: !!options.bold,
+        color: options.color || SC_COLOR.black,
+        size: options.size || 10,
+        name: options.name || '宋体',
+        h: options.h || 'center',
+        v: options.v || 'center',
+        wrap: !!options.wrap,
+        border: options.border !== false,
+      });
+
+      const ensureCell = (sheet, r, c) => {
+        const addr = XLSX.utils.encode_cell({ r: r - 1, c: c - 1 });
+        let cell = sheet[addr];
+        if (!cell) {
+          cell = { t: 's', v: '' };
+          sheet[addr] = cell;
+        }
+        const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+        if (r - 1 > range.e.r) range.e.r = r - 1;
+        if (c - 1 > range.e.c) range.e.c = c - 1;
+        sheet['!ref'] = XLSX.utils.encode_range(range);
+        return cell;
+      };
+
+      const styleCell = (sheet, r, c, style) => {
+        if (!sheet || !style) return;
+        const cell = ensureCell(sheet, r, c);
+        cell.st = Object.assign({}, cell.st || {}, style);
+      };
+
+      const styleRange = (sheet, firstRow, firstCol, lastRow, lastCol, style) => {
+        for (let r = firstRow; r <= lastRow; r++) {
+          for (let c = firstCol; c <= lastCol; c++) styleCell(sheet, r, c, style);
+        }
+      };
+
+      // 把相邻且“上级列 + 本列”相同的行纵向合并（原模板 A/B/C 列就是这种块状合并）
+      const mergeRepeatedRows = (sheet, firstRow, lastRow, col, keyCols) => {
+        if (!sheet || lastRow <= firstRow) return;
+        const merges = sheet['!merges'] || (sheet['!merges'] = []);
+        const cellText = (r, c) => {
+          const cell = sheet[XLSX.utils.encode_cell({ r: r - 1, c: c - 1 })];
+          return cell && cell.v !== undefined && cell.v !== null ? String(cell.v).trim() : '';
+        };
+        const keyOf = (r) => keyCols.map((c) => cellText(r, c)).join('\u0000');
+        let start = firstRow;
+        for (let r = firstRow + 1; r <= lastRow + 1; r++) {
+          const currentKey = keyOf(r - 1);
+          const ended = r > lastRow || keyOf(r) !== currentKey;
+          if (!ended) continue;
+          const runValue = cellText(start, col);
+          if (r - 1 > start && runValue && runValue !== '-') {
+            merges.push({ s: { r: start - 1, c: col - 1 }, e: { r: r - 2, c: col - 1 } });
+          }
+          start = r;
+        }
+      };
+
+      // 行高（点）与列宽（字符）：原模板表头行偏高、数据行 25
+      const setRowHeight = (sheet, row, height) => {
+        if (!sheet) return;
+        const rows = sheet['!rows'] || (sheet['!rows'] = []);
+        while (rows.length < row) rows.push(null);
+        rows[row - 1] = Object.assign({}, rows[row - 1] || {}, { hpt: height });
+      };
+
+      // 优先级条件配色：必须 / 合并 / 不测 / 可选 各一色，方便一眼看出哪些通道要测
+      const SC_PRIORITY_FILL = {
+        必须: 'FFD9ECFF',
+        必测: 'FFD9ECFF',
+        合并: 'FFFFF2CC',
+        不测: 'FFF2F2F2',
+        可选: 'FFEDE7F6',
       };
 
       // ---------- 0-封面 ----------
@@ -7607,6 +7805,161 @@ function bindEvents() {
         cols: [{ wch: 20 }, { wch: 46 }, { wch: 20 }, { wch: 24 }],
       });
 
+      // ---------- 统一套用样式：合并单元格 / 表头配色 / 优先级条件色 / 列宽 / 冻结窗格 ----------
+      // 分组交替色：同一模块内的通道保持同色，换模块换色（原模板按板卡/模块分组交替取样）
+      const groupParity = new Map();
+      let parity = 0;
+      let lastModuleName = null;
+      channels.forEach((row, index) => {
+        const moduleName = scText(row, 'module');
+        if (moduleName && lastModuleName !== null && moduleName !== lastModuleName) parity = 1 - parity;
+        if (moduleName) lastModuleName = moduleName;
+        groupParity.set(3 + index, parity);   // 1_电源配置表 数据行
+        groupParity.set(4 + index, parity);   // 3_功耗采集数据表 数据行
+      });
+      const priorityFillOf = (row) => SC_PRIORITY_FILL[scText(row, 'priority')] || SC_COLOR.white;
+
+      // --- 0-封面 ---
+      const coverSheet = workbook.Sheets['0-封面'];
+      styleRange(coverSheet, 1, 1, 1, 4, scStyle({ fill: SC_COLOR.headerBlue, bold: true, size: 16, name: '黑体' }));
+      styleRange(coverSheet, 3, 1, 8, 1, scStyle({ fill: SC_COLOR.headerBlue, bold: true }));
+      styleRange(coverSheet, 3, 2, 8, 2, scStyle({ h: 'left' }));
+      styleRange(coverSheet, 10, 1, 10, 2, scStyle({ fill: SC_COLOR.headerBlue, bold: true }));
+      styleRange(coverSheet, 11, 1, 18, 2, scStyle({ h: 'left', wrap: true }));
+      styleRange(coverSheet, 20, 1, 20, 4, scStyle({ h: 'left', wrap: true }));
+      setRowHeight(coverSheet, 1, 32);
+      setRowHeight(coverSheet, 20, 30);
+
+      // --- 1_电源配置表：表头浅蓝，A/B/C 青绿，D 浅黄，K 采样通道按分组交替 ---
+      const configSheet = workbook.Sheets['1_电源配置表'];
+      const configLastRow = 2 + channels.length;
+      configSheet['!cols'] = [{ wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 10 },
+        { wch: 22 }, { wch: 24 }, { wch: 24 }, { wch: 10 }, { wch: 12 },
+        { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 30 }, { wch: 16 }];
+      styleRange(configSheet, 1, 1, 1, 15, scStyle({ fill: SC_COLOR.headerBlue, bold: true, h: 'left', wrap: true }));
+      styleRange(configSheet, 2, 1, 2, 15, scStyle({ fill: SC_COLOR.headerBlue, bold: true, wrap: true }));
+      channels.forEach((row, index) => {
+        const r = 3 + index;
+        styleRange(configSheet, r, 1, r, 3, scStyle({ fill: SC_COLOR.teal, wrap: true }));
+        styleRange(configSheet, r, 4, r, 4, scStyle({ fill: SC_COLOR.yellow }));
+        styleCell(configSheet, r, 5, scStyle({ fill: priorityFillOf(row), bold: scText(row, 'priority') === '必须' }));
+        styleRange(configSheet, r, 6, r, 10, scStyle({ fill: SC_COLOR.white }));
+        styleCell(configSheet, r, 11, scStyle({
+          fill: groupParity.get(r) ? SC_COLOR.channelAlt : SC_COLOR.channelB,
+          color: SC_COLOR.fontDark,
+        }));
+        styleRange(configSheet, r, 12, r, 15, scStyle({ fill: SC_COLOR.white }));
+        setRowHeight(configSheet, r, 22);
+      });
+      setRowHeight(configSheet, 1, 42);
+      setRowHeight(configSheet, 2, 42);
+      configSheet['!freeze'] = 'E3';
+      mergeRepeatedRows(configSheet, 3, configLastRow, 1, [1]);
+      mergeRepeatedRows(configSheet, 3, configLastRow, 2, [1, 2]);
+      mergeRepeatedRows(configSheet, 3, configLastRow, 3, [1, 2, 3]);
+
+      // --- 2_电源信息表：黄=待填、绿=公式、灰=表头、红=SMPS 小节标题 ---
+      const infoSheet = workbook.Sheets['2_电源信息表'];
+      if (infoSheet) {
+        infoSheet['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+          { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 22 }, { wch: 20 }, { wch: 26 }];
+        styleRange(infoSheet, 1, 1, 1, 4, scStyle({ bold: true, h: 'left' }));
+        styleRange(infoSheet, 2, 1, 2, 4, scStyle({ fill: SC_COLOR.gray, bold: true, wrap: true }));
+        styleRange(infoSheet, 3, 1, 3, 4, scStyle({ fill: SC_COLOR.yellow }));
+        styleRange(infoSheet, 5, 1, 5, 13, scStyle({ fill: SC_COLOR.red, bold: true, color: 'FFFFFFFF' }));
+        styleRange(infoSheet, 6, 1, 7, 13, scStyle({ fill: SC_COLOR.gray, bold: true, wrap: true }));
+        styleRange(infoSheet, smpsFirst, 1, smpsLast, 4, scStyle({ fill: SC_COLOR.yellow }));
+        styleRange(infoSheet, smpsFirst, 5, smpsLast, 11, scStyle({ fill: SC_COLOR.yellow }));
+        styleRange(infoSheet, smpsFirst, 12, smpsLast, 13, scStyle({ fill: SC_COLOR.green }));
+        styleRange(infoSheet, ldoTitleRow, 1, ldoTitleRow, 9, scStyle({ fill: SC_COLOR.gray, bold: true, h: 'left' }));
+        styleRange(infoSheet, ldoHeadRow, 1, ldoHeadRow, 9, scStyle({ fill: SC_COLOR.gray, bold: true, wrap: true }));
+        styleRange(infoSheet, ldoFirst, 1, ldoLast, 4, scStyle({ fill: SC_COLOR.yellow }));
+        styleRange(infoSheet, ldoFirst, 5, ldoLast, 7, scStyle({ fill: SC_COLOR.orange }));
+        styleRange(infoSheet, ldoFirst, 8, ldoLast, 8, scStyle({ fill: SC_COLOR.yellow }));
+        styleRange(infoSheet, ldoFirst, 9, ldoLast, 9, scStyle({ fill: SC_COLOR.green }));
+        setRowHeight(infoSheet, 5, 24);
+        setRowHeight(infoSheet, 6, 30);
+        setRowHeight(infoSheet, ldoTitleRow, 24);
+        setRowHeight(infoSheet, ldoHeadRow, 30);
+        const infoMerges = infoSheet['!merges'] || (infoSheet['!merges'] = []);
+        infoMerges.push({ s: { r: ldoTitleRow - 1, c: 0 }, e: { r: ldoTitleRow - 1, c: 8 } });
+      }
+
+      // --- 3_功耗采集数据表：灰表头 + 青绿模块区 + 黄色采集区 + 绿色效率列 ---
+      const acqSheet = workbook.Sheets['3_功耗采集数据表'];
+      acqSheet['!cols'] = [{ wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 20 }, { wch: 10 },
+        { wch: 18 }, { wch: 22 }, { wch: 22 }, { wch: 10 }, { wch: 12 },
+        { wch: 14 }, { wch: 22 }, { wch: 11 }, { wch: 11 }, { wch: 11 },
+        { wch: 18 }, { wch: 11 }, { wch: 18 }, { wch: 11 },
+        { wch: 13 }, { wch: 15 }, { wch: 13 }, { wch: 15 }];
+      styleRange(acqSheet, 1, 1, 1, 23, scStyle({ fill: SC_COLOR.headerGray, bold: true }));
+      styleRange(acqSheet, 2, 1, 3, 23, scStyle({ fill: SC_COLOR.headerGray, bold: true, wrap: true }));
+      channels.forEach((row, index) => {
+        const r = 4 + index;
+        const alt = groupParity.get(r);
+        styleRange(acqSheet, r, 1, r, 3, scStyle({ fill: SC_COLOR.teal, wrap: true }));
+        styleRange(acqSheet, r, 4, r, 4, scStyle({ fill: SC_COLOR.white }));
+        styleCell(acqSheet, r, 5, scStyle({ fill: priorityFillOf(row), bold: scText(row, 'priority') === '必须' }));
+        styleRange(acqSheet, r, 6, r, 10, scStyle({ fill: SC_COLOR.white, name: 'Times New Roman' }));
+        styleCell(acqSheet, r, 11, scStyle({ fill: alt ? SC_COLOR.channelAlt : SC_COLOR.channelA, color: SC_COLOR.fontDark }));
+        styleCell(acqSheet, r, 12, scStyle({ fill: alt ? SC_COLOR.channelAlt : SC_COLOR.channelB, color: SC_COLOR.fontDark }));
+        styleRange(acqSheet, r, 13, r, 15, scStyle({ fill: SC_COLOR.yellow, name: 'Times New Roman' }));
+        styleCell(acqSheet, r, 16, scStyle({ fill: SC_COLOR.white }));
+        styleCell(acqSheet, r, 17, scStyle({ fill: SC_COLOR.green, name: 'Times New Roman' }));
+        styleCell(acqSheet, r, 18, scStyle({ fill: SC_COLOR.white }));
+        styleCell(acqSheet, r, 19, scStyle({ fill: SC_COLOR.green, name: 'Times New Roman' }));
+        styleRange(acqSheet, r, 20, r, 23, scStyle({ fill: SC_COLOR.white, name: 'Times New Roman' }));
+        setRowHeight(acqSheet, r, 25);
+      });
+      setRowHeight(acqSheet, 1, 26.4);
+      setRowHeight(acqSheet, 2, 34);
+      setRowHeight(acqSheet, 3, 22);
+      acqSheet['!freeze'] = 'N4';
+      mergeRepeatedRows(acqSheet, 4, lastDataRow, 1, [1]);
+      mergeRepeatedRows(acqSheet, 4, lastDataRow, 2, [1, 2]);
+      mergeRepeatedRows(acqSheet, 4, lastDataRow, 3, [1, 2, 3]);
+
+      // --- 4-统计：小节标题浅蓝、表头与数据浅绿 ---
+      const statSheet = workbook.Sheets['4-统计'];
+      const statLastCol = Math.max(totalColIndex + 1, 6);
+      styleRange(statSheet, 1, 1, 1, statLastCol, scStyle({ bold: true, h: 'left', border: false }));
+      [2, 6, 10, 14].forEach((r) => {
+        styleRange(statSheet, r, 1, r, statLastCol, scStyle({ fill: SC_COLOR.sectionBlue, bold: true, h: 'left' }));
+        setRowHeight(statSheet, r, 24);
+      });
+      [3, 7, 11, 15].forEach((r) => {
+        styleRange(statSheet, r, 1, r, statLastCol, scStyle({ fill: SC_COLOR.green, bold: true, wrap: true }));
+        setRowHeight(statSheet, r, 24);
+      });
+      [4, 8, 12].forEach((r) => styleRange(statSheet, r, 1, r, statLastCol, scStyle({ fill: SC_COLOR.green })));
+      const statDetailLast = 16 + Math.max(pairs.length, 1) - 1;
+      styleRange(statSheet, 16, 1, statDetailLast + (pairs.length ? 1 : 0), statLastCol, scStyle({ fill: SC_COLOR.white }));
+      if (pairs.length) {
+        const sumRow = statDetailLast + 1;
+        styleRange(statSheet, sumRow, 1, sumRow, statLastCol, scStyle({ fill: SC_COLOR.green, bold: true }));
+      }
+
+      // --- 5-测试原始数据 / 6-QEPM原始数据：只给表头加灰底，方便粘贴时对齐 ---
+      const testSheet = workbook.Sheets['5-测试原始数据'];
+      if (testSheet) {
+        styleRange(testSheet, 1, 1, 1, Math.max(channelNames.length * 3 + 1, 1), scStyle({ fill: SC_COLOR.headerGray, bold: true, border: false, h: 'left' }));
+        styleRange(testSheet, 3, 1, 3, Math.max(channelNames.length * 3 + 1, 1), scStyle({ fill: SC_COLOR.headerGray, bold: true, border: false }));
+        styleRange(testSheet, 4, 1, 4, Math.max(channelNames.length * 3 + 1, 1), scStyle({ fill: SC_COLOR.yellow, border: false }));
+        styleRange(testSheet, 6, 1, 6, Math.max(channelNames.length * 3 + 1, 1), scStyle({ fill: SC_COLOR.green, bold: true, border: false }));
+        setRowHeight(testSheet, 3, 24);
+      }
+      const qepmSheet = workbook.Sheets['6-QEPM原始数据'];
+      if (qepmSheet) {
+        styleRange(qepmSheet, 3, 1, 3, Math.max(channelNames.length * 3 + 1, 1), scStyle({ fill: SC_COLOR.headerGray, bold: true, border: false }));
+      }
+
+      // --- 附录-DOU测试场景 ---
+      const appendixSheet = workbook.Sheets['附录-DOU测试场景'];
+      if (appendixSheet) {
+        styleRange(appendixSheet, 1, 1, 1, 4, scStyle({ bold: true, h: 'left', border: false }));
+        styleRange(appendixSheet, 2, 1, 2, 4, scStyle({ fill: SC_COLOR.headerBlue, bold: true }));
+      }
+
       return workbook;
     }
 
@@ -7654,7 +8007,7 @@ function bindEvents() {
         + '<div class="auto-gen-result-body"><strong>生成失败</strong><small>' + escapeHtml(message || '未知错误') + '</small></div>';
     }
 
-    function handleAutoGenClick() {
+    async function handleAutoGenClick() {
       const rows = state.samplingChannelOnlineRows
         .filter((row) => Object.keys(row).some((key) => scText(row, key) !== ''));
       if (!rows.length) {
@@ -7676,9 +8029,11 @@ function bindEvents() {
       try {
         const workbook = buildBreakdownWorkbook(rows, projectName);
         const fileName = scFileName(projectName);
-        XLSX.writeFile(workbook, fileName, { compression: true });
+        // SheetJS 社区版写不出样式，统一走 xlsx-populate 才能还原模板的合并/配色/列宽/冻结
+        const writeResult = await scWriteWorkbookWithStyle(workbook, fileName);
         try { localStorage.setItem(AUTO_GEN_PROJECT_KEY, projectName); } catch { /* ignore */ }
-        const sizeText = '命名规则：项目名_功耗拆解数据处理模板_日期.xlsx';
+        const sizeText = (writeResult && writeResult.size ? Math.max(1, Math.round(writeResult.size / 1024)) + ' KB · ' : '')
+          + (writeResult && writeResult.styled ? '已还原模板格式（合并单元格 / 配色 / 列宽 / 冻结窗格）' : '样式未写入（xlsx-populate 未加载）');
         showAutoGenResult(fileName, rows.length, sizeText);
       } catch (error) {
         console.error(error);
