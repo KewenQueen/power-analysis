@@ -7143,8 +7143,9 @@ function bindEvents() {
     const POWER_CONFIG_FIELDS = ['module', 'sub_module', 'tiny_module', 'power_domain', 'priority', 'net', 'net_plus', 'net_minus', 'resistor', 'resistor_ref', 'qc_channel', 'dcdc_l1', 'ldo_l2', 'remark', 'schematic_check'];
 
     // 3_功耗采集数据表 A-W（23 列，含 4 个待计算的功率列）
-    const ACQ_HEADERS = ['模块', '子模块', 'tiny模块', 'power domain', '优先级', '采样通道', '采样通道 NET+', '采样通道 NET-', '采样电阻\n_mΩ', '电阻编号', '采样通道\nQC', '采样通道编号\n（QEPM）', '模块', '子模块', 'tiny模块', '输入电源-1级_DCDC', 'Efficiency', '输入电源-2级_LDO', 'Efficiency', 'Total\nEfficiency', 'Power @VBATT\nmW', 'Include \nin Sum?', 'Power in Sum\n(mW)'];
-    const ACQ_SUB_HEADERS = ['', '子模块', 'tiny模块', 'power domain', '', '', '', '采样电阻\nmΩ', '电阻选型', '电阻编号', '采样通道', '', 'Vavg(V)', 'Iavg(mA)', 'Pavg(mW)', 'DCDC', 'Efficiency', 'LDO', 'Efficiency', '', '', '', ''];
+    const ACQ_HEADERS = ['模块', '子模块', 'tiny模块', 'power domain', '优先级', '采样通道', '采样通道 NET+', '采样通道 NET-', '采样电阻\n_mΩ', '电阻编号', '采样通道\nQC', '采样通道编号\n（QEPM）', '模块', '', '', '输入电源-1级_DCDC', '', '输入电源-2级_LDO', '', 'Total\nEfficiency', 'Power @VBATT\nmW', 'Include \nin Sum?', 'Power in Sum\n(mW)'];
+    const ACQ_COL_WIDTHS = [{ wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 10 }, { wch: 12 }, { wch: 13 }, { wch: 22 }, { wch: 11 }, { wch: 11 }, { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 13 }, { wch: 14 }, { wch: 13 }, { wch: 14 }];
+    const ACQ_SUB_HEADERS = ['', '', '', '', '', '', '', '采样电阻\nmΩ', '电阻选型', '电阻编号', '采样通道', '', 'Vavg(V)', 'Iavg(mA)', 'Pavg(mW)', 'DCDC', 'Efficiency', 'LDO', 'Efficiency', '', '', '', ''];
 
     const POWER_CONFIG_NOTES = [
       '通道设计原则：',
@@ -7230,34 +7231,92 @@ function bindEvents() {
         + '-' + String(today.getDate()).padStart(2, '0');
       const workbook = XLSX.utils.book_new();
 
+      const totalRows = channels.length;
+      const lastDataRow = 3 + totalRows;              // 3_功耗采集数据表 的最后一条数据行
+      const dcdcNames = scUniqueValues(channels, 'dcdc_l1');
+      const ldoNames = scUniqueValues(channels, 'ldo_l2');
+      const modules = scUniqueValues(channels, 'module');
+      const channelNames = channels.map((row) => scQepmChannelName(row)).filter(Boolean);
+
+      // 2_电源信息表 的行布局：3_功耗采集数据表 的 VLOOKUP 区间必须与之精确对齐
+      const smpsFirst = 8;
+      const smpsLast = smpsFirst + Math.max(dcdcNames.length, 1) - 1;
+      const ldoTitleRow = smpsLast + 2;
+      const ldoHeadRow = ldoTitleRow + 1;
+      const ldoFirst = ldoHeadRow + 1;
+      const ldoLast = ldoFirst + Math.max(ldoNames.length, 1) - 1;
+      const smpsLookup = `'2_电源信息表'!$B$${smpsFirst}:$M$${smpsLast}`;
+      const ldoLookup = `'2_电源信息表'!$B$${ldoFirst}:$I$${ldoLast}`;
+      // 3_功耗采集数据表的整列区间（Power in Sum / Pavg / 模块 / 子模块）
+      const rngW = `'3_功耗采集数据表'!$W$4:$W$${lastDataRow}`;
+      const rngO = `'3_功耗采集数据表'!$O$4:$O$${lastDataRow}`;
+      const rngA = `'3_功耗采集数据表'!$A$4:$A$${lastDataRow}`;
+      const rngB = `'3_功耗采集数据表'!$B$4:$B$${lastDataRow}`;
+
+      // 写入公式单元格：SheetJS 的 f 属性不能带前导 "="，且必须落在 !ref 范围内
+      const applyFormulas = (sheet, cells) => {
+        let maxR = 0;
+        let maxC = 0;
+        cells.forEach((item) => {
+          const addr = XLSX.utils.decode_cell(item.addr);
+          sheet[item.addr] = { t: item.t || 'n', f: String(item.f).replace(/^=/, '') };
+          maxR = Math.max(maxR, addr.r);
+          maxC = Math.max(maxC, addr.c);
+        });
+        const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+        if (maxR > range.e.r) range.e.r = maxR;
+        if (maxC > range.e.c) range.e.c = maxC;
+        sheet['!ref'] = XLSX.utils.encode_range(range);
+        return sheet;
+      };
+      // 数字格式：与原模板保持一致的显示（效率用百分比，功率用两位小数）
+      const formatRange = (sheet, cols, firstRow, lastRow, fmt) => {
+        if (!sheet) return;
+        cols.forEach((col) => {
+          for (let r = firstRow; r <= lastRow; r++) {
+            const cell = sheet[col + r];
+            if (cell) cell.z = fmt;
+          }
+        });
+      };
+      // 按行列号写值，便于构造行号精确对齐的表格（1-based，与 Excel 行号一致）
+      const put = (grid, r, c, value) => {
+        while (grid.length < r) grid.push([]);
+        const target = grid[r - 1];
+        while (target.length < c) target.push(null);
+        target[c - 1] = value;
+      };
+
       // ---------- 0-封面 ----------
       const cover = [
         ['功耗拆解数据处理模板'],
         [],
         ['项目名称', projectLabel],
         ['生成日期', dateLabel],
-        ['通道数量', channels.length],
+        ['通道数量', totalRows],
+        ['模块数量', modules.length],
+        ['DCDC / LDO 数量', dcdcNames.length + ' / ' + ldoNames.length],
         ['生成方式', '功耗续航工作台 · 项目模板管理 · 拆解模板自动生成'],
         [],
         ['Sheet', '说明'],
         ['0-封面', '项目信息与模板说明'],
         ['1_电源配置表', '采样通道清单（通道设计原则 + 逐通道配置）'],
-        ['2_电源信息表', '电池信息 / SMPS 效率表（待填写）'],
-        ['3_功耗采集数据表', '采集数据汇总；Total Efficiency / Power @VBATT mW / Include in Sum? / Power in Sum(mW) 由实测数据计算'],
-        ['4-统计', '模块占比统计（公式待补充）'],
-        ['5-测试原始数据', '测试仪原始数据（由 QEPM 原始数据计算）'],
-        ['6-QEPM原始数据', 'QEPM 导出原始数据粘贴区（表头已按采样通道生成）'],
-        ['附录-DOU测试场景', 'DOU 测试场景说明'],
+        ['2_电源信息表', '电池信息 / SMPS 效率表 / LDO 效率表；SMPS 效率按实测电流插值'],
+        ['3_功耗采集数据表', '采集数据汇总；Total Efficiency / Power @VBATT mW / Include in Sum? / Power in Sum(mW) 全部为公式'],
+        ['4-统计', '按模块、子模块 SUMIFS 汇总（电池端 / 负载端 / 效率），含合计行列'],
+        ['5-测试原始数据', '粘贴测试仪导出的原始数据（列名与 6-QEPM原始数据 一致）'],
+        ['6-QEPM原始数据', '粘贴 QEPM 导出的原始数据，列名按 _I / _P / _V 顺序生成'],
+        ['附录-DOU测试场景', 'DOU 测试场景记录'],
         [],
-        ['使用说明', '1、核对 1_电源配置表 通道信息；2、将 QEPM 导出数据粘贴到 6-QEPM原始数据；3、在 3_功耗采集数据表 填写实测 Vavg / Iavg / Pavg 与电源效率；4、补齐统计表公式。'],
+        ['填写顺序', '1. 补 2_电源信息表 的电压与效率 → 2. 用 5/6 表粘贴实测数据 → 3. 在 3 表标 Y/N 决定是否纳入汇总 → 4. 查看 4-统计'],
       ];
       workbook.SheetNames.push('0-封面');
       workbook.Sheets['0-封面'] = scSheetFromAoa(cover, {
-        cols: [{ wch: 26 }, { wch: 88 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 30 }],
-        merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }],
+        cols: [{ wch: 20 }, { wch: 56 }, { wch: 18 }, { wch: 18 }],
+        merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }, { s: { r: 19, c: 1 }, e: { r: 19, c: 3 } }],
       });
 
-      // ---------- 1_电源配置表 ----------
+      // ---------- 1_电源配置表（纯数据，无公式） ----------
       const configAoa = [[POWER_CONFIG_NOTES], POWER_CONFIG_HEADERS];
       channels.forEach((row) => {
         configAoa.push(POWER_CONFIG_FIELDS.map((key) => scSheetValue(row, key)));
@@ -7268,35 +7327,84 @@ function bindEvents() {
         merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 14 } }],
       });
 
-      // ---------- 2_电源信息表 ----------
-      const batteryBlock = [
-        ['1. Battery Information'],
-        ['Battery Type', 'Vbat (V)', 'Vsys (V)', 'Vbat to Vsys Efficiency'],
-        ['Single Cell', 4, 4, 1],
-        [],
-        ['2. SMPS Information(效率需更新)'],
-        ['PMIC', 'SMPS', 'Type', 'Voltage (V)', 'Efficiency by Load (mA)', '', '', '', '', '', '', 'Itotal in Current Case (mA)', 'Efficiency in Current Case', '备注'],
-        ['', '', '', '', 1, 10, 100, 1000, 2500, 4000, 10000, '', '', '效率值按实测更新，默认 0.8'],
-      ];
-      const dcdcList = scUniqueValues(channels, 'dcdc_l1');
-      const ldoList = scUniqueValues(channels, 'ldo_l2');
-      const infoAoa = batteryBlock.slice();
-      if (dcdcList.length || ldoList.length) {
-        infoAoa.push([]);
-        infoAoa.push(['3. DCDC / LDO 清单（来自采样通道梳理）']);
-        infoAoa.push(['类型', '名称', '关联通道数']);
-        const countOf = (key, value) => channels.filter((row) => scText(row, key) === value).length;
-        dcdcList.forEach((name) => infoAoa.push(['DCDC', name, countOf('dcdc_l1', name)]));
-        ldoList.forEach((name) => infoAoa.push(['LDO', name, countOf('ldo_l2', name)]));
-      }
-      workbook.SheetNames.push('2_电源信息表');
-      workbook.Sheets['2_电源信息表'] = scSheetFromAoa(infoAoa, {
-        cols: [{ wch: 20 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 40 }],
+      // ---------- 2_电源信息表（SMPS / LDO 效率，供 3 表 VLOOKUP） ----------
+      const infoGrid = [];
+      put(infoGrid, 1, 1, '1. Battery Information');
+      ['Battery Type', 'Vbat (V)', 'Vsys (V)', 'Vbat to Vsys Efficiency']
+        .forEach((label, i) => put(infoGrid, 2, i + 1, label));
+      ['Single Cell', 4, 4, 1].forEach((value, i) => put(infoGrid, 3, i + 1, value));
+
+      put(infoGrid, 5, 1, '2. SMPS Information(效率需更新)');
+      ['PMIC', 'SMPS', 'Type', 'Voltage (V)'].forEach((label, i) => put(infoGrid, 6, i + 1, label));
+      put(infoGrid, 6, 5, 'Efficiency by Load (mA)');
+      put(infoGrid, 6, 12, 'Itotal in Current Case (mA)');
+      put(infoGrid, 6, 13, 'Efficiency in Current Case');
+      put(infoGrid, 6, 14, '备注');
+      [1, 10, 100, 1000, 2500, 4000, 10000].forEach((load, i) => put(infoGrid, 7, 5 + i, load));
+      const smpsRows = dcdcNames.length ? dcdcNames : [''];
+      smpsRows.forEach((name, i) => {
+        const r = smpsFirst + i;
+        put(infoGrid, r, 2, name);
+        for (let c = 5; c <= 11; c++) put(infoGrid, r, c, 0.8);   // 默认效率 0.8，按实测改
       });
 
-      // ---------- 3_功耗采集数据表 ----------
-      const acqAoa = [['Power Board Channel Allocation'], ACQ_HEADERS, ACQ_SUB_HEADERS];
+      put(infoGrid, ldoTitleRow, 1, '3. LDO Information');
+      ['PMIC', 'LDO', 'Type', 'Voltage (V)', 'V_In（DCDC）', 'Voltage (V)', 'V_In (V)', 'V_Out (V)', 'Efficiency (%)']
+        .forEach((label, i) => put(infoGrid, ldoHeadRow, i + 1, label));
+      const ldoRows = ldoNames.length ? ldoNames : [''];
+      ldoRows.forEach((name, i) => put(infoGrid, ldoFirst + i, 2, name));
+
+      const infoFormulas = [];
+      smpsRows.forEach((name, i) => {
+        const r = smpsFirst + i;
+        // 该 SMPS 在实测数据里承担的电流合计（3 表 P = DCDC 名称，N = Iavg）
+        infoFormulas.push({
+          addr: 'L' + r,
+          f: `SUMIF('3_功耗采集数据表'!$P$4:$P$${lastDataRow},$B${r},'3_功耗采集数据表'!$N$4:$N$${lastDataRow})`,
+        });
+        // 在相邻两个负载点之间线性插值求当前电流下的效率（不用数组公式，WPS/旧版 Excel 也能算）
+        const at = `MATCH($L${r},$E$7:$K$7,1)`;
+        const eff1 = `INDEX($E${r}:$K${r},${at})`;
+        const eff2 = `INDEX($E${r}:$K${r},${at}+1)`;
+        const load1 = `INDEX($E$7:$K$7,${at})`;
+        const load2 = `INDEX($E$7:$K$7,${at}+1)`;
+        infoFormulas.push({
+          addr: 'M' + r,
+          f: `IFERROR(IF($L${r}<=$E$7,$E${r},IF($L${r}>=$K$7,$K${r},`
+            + `${eff1}+(${eff2}-${eff1})*($L${r}-${load1})/(${load2}-${load1}))),$E${r})`,
+        });
+      });
+      ldoRows.forEach((name, i) => {
+        const r = ldoFirst + i;
+        // LDO 效率 ≈ V_Out / V_In
+        infoFormulas.push({ addr: 'I' + r, f: `IFERROR($H${r}/$G${r},1)` });
+      });
+
+      workbook.SheetNames.push('2_电源信息表');
+      workbook.Sheets['2_电源信息表'] = scSheetFromAoa(infoGrid, {
+        cols: [{ wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 22 }, { wch: 22 }, { wch: 30 }],
+        merges: [
+          { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
+          { s: { r: 4, c: 0 }, e: { r: 4, c: 12 } },
+          { s: { r: 5, c: 4 }, e: { r: 5, c: 10 } },
+          { s: { r: 5, c: 0 }, e: { r: 6, c: 0 } },
+          { s: { r: 5, c: 1 }, e: { r: 6, c: 1 } },
+          { s: { r: 5, c: 2 }, e: { r: 6, c: 2 } },
+          { s: { r: 5, c: 3 }, e: { r: 6, c: 3 } },
+          { s: { r: 5, c: 11 }, e: { r: 6, c: 11 } },
+          { s: { r: 5, c: 12 }, e: { r: 6, c: 12 } },
+        ],
+      });
+      applyFormulas(workbook.Sheets['2_电源信息表'], infoFormulas);
+      formatRange(workbook.Sheets['2_电源信息表'], ['E', 'F', 'G', 'H', 'I', 'J', 'K'], smpsFirst, smpsLast, '0%');
+      formatRange(workbook.Sheets['2_电源信息表'], ['L'], smpsFirst, smpsLast, '0.000');
+      formatRange(workbook.Sheets['2_电源信息表'], ['M'], smpsFirst, smpsLast, '0%');
+      formatRange(workbook.Sheets['2_电源信息表'], ['I'], ldoFirst, ldoLast, '0.00%');
+
+      // ---------- 3_功耗采集数据表（核心公式区） ----------
+      const acqAoa = [['Power Board Channel Allocation'], ACQ_HEADERS.slice(), ACQ_SUB_HEADERS.slice()];
       channels.forEach((row) => {
+        const priority = scText(row, 'priority');
         acqAoa.push([
           scSheetValue(row, 'module'),
           scSheetValue(row, 'sub_module'),
@@ -7309,48 +7417,182 @@ function bindEvents() {
           scSheetValue(row, 'resistor'),
           scSheetValue(row, 'resistor_ref'),
           scSheetValue(row, 'qc_channel'),
-          scQepmChannelName(row),
-          '', '', '',
-          scSheetValue(row, 'dcdc_l1'), '', scSheetValue(row, 'ldo_l2'), '',
-          '', '', '', '',
+          '',                                        // L: 采样通道编号（QEPM）— 公式生成
+          '', '', '',                                // M/N/O: Vavg / Iavg / Pavg — 公式取实测值
+          scText(row, 'dcdc_l1') || '-',             // P: 输入电源-1级_DCDC
+          '',                                        // Q: DCDC 效率 — 公式
+          scText(row, 'ldo_l2') || '-',              // R: 输入电源-2级_LDO
+          '',                                        // S: LDO 效率 — 公式
+          '',                                        // T: Total Efficiency — 公式
+          '',                                        // U: Power @VBATT mW — 公式
+          /^必须|^必测/.test(priority) ? 'Y' : 'N',   // V: Include in Sum?（必测默认 Y）
+          '',                                        // W: Power in Sum(mW) — 公式
         ]);
       });
+
+      const acqFormulas = [];
+      for (let r = 4; r <= lastDataRow; r++) {
+        // QEPM 通道名 = QC 通道 + NET-（与 5/6 表的列名保持一致）
+        acqFormulas.push({ addr: 'L' + r, t: 'str', f: `IF(OR($H${r}="",$H${r}="-"),$K${r},$K${r}&"_"&$H${r})` });
+        acqFormulas.push({ addr: 'M' + r, f: `_xlfn.IFNA(HLOOKUP("*"&$L${r}&"_V",'5-测试原始数据'!$A$3:$ZZ$9,4,FALSE)/1000,0)` });
+        acqFormulas.push({ addr: 'N' + r, f: `_xlfn.IFNA(HLOOKUP("*"&$L${r}&"_I",'5-测试原始数据'!$A$3:$ZZ$9,4,FALSE),0)` });
+        acqFormulas.push({ addr: 'O' + r, f: `_xlfn.IFNA(HLOOKUP("*"&$L${r}&"_P",'5-测试原始数据'!$A$3:$ZZ$9,4,FALSE),0)` });
+        acqFormulas.push({ addr: 'Q' + r, f: `IF($P${r}="-",1,_xlfn.IFNA(VLOOKUP($P${r},${smpsLookup},12,FALSE),1))` });
+        acqFormulas.push({ addr: 'S' + r, f: `IF($R${r}="-",1,_xlfn.IFNA(VLOOKUP($R${r},${ldoLookup},8,FALSE),1))` });
+        acqFormulas.push({ addr: 'T' + r, f: `$Q${r}*$S${r}` });
+        acqFormulas.push({ addr: 'U' + r, f: `IFERROR($O${r}/$T${r},0)` });
+        acqFormulas.push({ addr: 'W' + r, f: `IF($V${r}="Y",$U${r},0)` });
+      }
+
       workbook.SheetNames.push('3_功耗采集数据表');
       workbook.Sheets['3_功耗采集数据表'] = scSheetFromAoa(acqAoa, {
-        cols: [{ wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 10 }, { wch: 18 }, { wch: 24 }, { wch: 24 }, { wch: 10 }, { wch: 12 }, { wch: 13 }, { wch: 22 }, { wch: 11 }, { wch: 11 }, { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 18 }, { wch: 11 }, { wch: 13 }, { wch: 14 }, { wch: 13 }, { wch: 14 }],
-        merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 22 } }],
+        cols: ACQ_COL_WIDTHS,
+        merges: [
+          { s: { r: 0, c: 0 }, e: { r: 0, c: 22 } },
+          { s: { r: 1, c: 0 }, e: { r: 2, c: 0 } },     // A 模块
+          { s: { r: 1, c: 1 }, e: { r: 2, c: 1 } },     // B 子模块
+          { s: { r: 1, c: 2 }, e: { r: 2, c: 2 } },     // C tiny模块
+          { s: { r: 1, c: 3 }, e: { r: 2, c: 3 } },     // D power domain
+          { s: { r: 1, c: 4 }, e: { r: 2, c: 4 } },     // E 优先级
+          { s: { r: 1, c: 5 }, e: { r: 2, c: 5 } },     // F 采样通道
+          { s: { r: 1, c: 6 }, e: { r: 2, c: 6 } },     // G NET+
+          { s: { r: 1, c: 11 }, e: { r: 2, c: 11 } },   // L QEPM
+          { s: { r: 1, c: 12 }, e: { r: 1, c: 14 } },   // M:O 模块（Vavg / Iavg / Pavg）
+          { s: { r: 1, c: 19 }, e: { r: 2, c: 19 } },   // T Total Efficiency
+          { s: { r: 1, c: 20 }, e: { r: 2, c: 20 } },   // U Power @VBATT
+          { s: { r: 1, c: 21 }, e: { r: 2, c: 21 } },   // V Include in Sum?
+          { s: { r: 1, c: 22 }, e: { r: 2, c: 22 } },   // W Power in Sum
+        ],
       });
+      applyFormulas(workbook.Sheets['3_功耗采集数据表'], acqFormulas);
+      formatRange(workbook.Sheets['3_功耗采集数据表'], ['N', 'O'], 4, lastDataRow, '0.00');
+      formatRange(workbook.Sheets['3_功耗采集数据表'], ['Q', 'S', 'T'], 4, lastDataRow, '0.00%');
+      formatRange(workbook.Sheets['3_功耗采集数据表'], ['U', 'W'], 4, lastDataRow, '0.00');
 
       // ---------- 4-统计 ----------
-      const modules = scUniqueValues(channels, 'module');
-      const statsAoa = [];
-      const statBlock = (title, subTitle, note) => {
-        statsAoa.push([title]);
-        statsAoa.push([subTitle]);
-        statsAoa.push(modules.concat(['ERROR']));
-        statsAoa.push(modules.map(() => '').concat(['']));
-        statsAoa.push([]);
-        if (note) statsAoa.push([note]);
-      };
-      statBlock('1. 模块占比', '折算到电池端_mW@VBAT(含电源效率，电源效率存在误差)');
-      statBlock('负载端_mW@负载(无电源效率)', '按模块汇总负载端功率（公式待补充）');
-      statBlock('负载端/电池端效率_%', '各模块电源转换效率（公式待补充）');
-      if (!modules.length) statsAoa.push(['（尚未梳理模块信息，请先在 1_电源配置表 中填写「模块」列）']);
-      statsAoa.push(['说明：本版本仅生成统计表骨架（模块行列已按通道数据生成），公式将在后续版本补充。']);
-      workbook.SheetNames.push('4-统计');
-      workbook.Sheets['4-统计'] = scSheetFromAoa(statsAoa, {
-        cols: [{ wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 }],
+      const statGrid = [];
+      const colLetter = (index) => XLSX.utils.encode_col(index);
+      const lastModuleCol = modules.length;                    // 模块占 1..n 列
+      const errorColIndex = lastModuleCol;                      // 0-based
+      const totalColIndex = lastModuleCol + 1;
+      const totalColLetter = colLetter(totalColIndex);
+      const errorColLetter = colLetter(errorColIndex);
+      const moduleLetters = modules.map((_, i) => colLetter(i));
+
+      put(statGrid, 1, 1, '1. 模块占比');
+      put(statGrid, 2, 1, '折算到电池端_mW@VBAT(含电源效率，电源效率存在误差)');
+      put(statGrid, 6, 1, '负载端_mW@负载(无电源效率)');
+      put(statGrid, 10, 1, '负载端/电池端效率_%');
+
+      // 三个小节共用同一套表头：模块列 + ERROR + 合计
+      [3, 7, 11].forEach((headerRow) => {
+        modules.forEach((name, i) => put(statGrid, headerRow, i + 1, name));
+        put(statGrid, headerRow, errorColIndex + 1, 'ERROR');
+        put(statGrid, headerRow, totalColIndex + 1, '合计');
       });
 
+      const statFormulas = [];
+      const sections = [
+        { dataRow: 4, headerRow: 3, rng: rngW },   // 折算到电池端（Power in Sum）
+        { dataRow: 8, headerRow: 7, rng: rngO },   // 负载端（Pavg）
+      ];
+      sections.forEach((section) => {
+        const r = section.dataRow;
+        modules.forEach((name, i) => {
+          const letter = moduleLetters[i];
+          statFormulas.push({
+            addr: `${letter}${r}`,
+            f: `SUMIFS(${section.rng},${rngA},${letter}$${section.headerRow})`,
+          });
+        });
+        statFormulas.push({ addr: `${totalColLetter}${r}`, f: `SUM(${section.rng})` });
+        statFormulas.push({ addr: `${errorColLetter}${r}`, f: `${totalColLetter}${r}-SUM(${moduleLetters[0]}${r}:${moduleLetters[moduleLetters.length - 1]}${r})` });
+      });
+      // 效率小节 = 负载端 / 电池端
+      modules.forEach((name, i) => {
+        const letter = moduleLetters[i];
+        statFormulas.push({ addr: `${letter}12`, f: `IFERROR(${letter}8/${letter}4,0)` });
+      });
+      statFormulas.push({ addr: `${totalColLetter}12`, f: `IFERROR(${totalColLetter}8/${totalColLetter}4,0)` });
+      statFormulas.push({ addr: `${errorColLetter}12`, f: `IFERROR(${errorColLetter}8/${errorColLetter}4,0)` });
+
+      // 2. 子模块明细：SUMIFS 汇总 + 合计行
+      const pairs = [];
+      const seenPair = new Set();
+      channels.forEach((row) => {
+        const moduleName = scText(row, 'module');
+        const subName = scText(row, 'sub_module');
+        const key = moduleName + '\u0000' + subName;
+        if (seenPair.has(key)) return;
+        seenPair.add(key);
+        pairs.push([moduleName, subName]);
+      });
+
+      const detailTitleRow = 14;
+      const detailHeadRow = 15;
+      const detailFirstRow = 16;
+      put(statGrid, detailTitleRow, 1, '2. 子模块明细（SUMIFS 汇总，含合计行）');
+      ['模块', '子模块', '折算到电池端_mW', '负载端_mW', '负载端/电池端效率_%', '通道数']
+        .forEach((label, i) => put(statGrid, detailHeadRow, i + 1, label));
+      pairs.forEach((pair, i) => {
+        const r = detailFirstRow + i;
+        put(statGrid, r, 1, pair[0] || '（未填写模块）');
+        put(statGrid, r, 2, pair[1] || '（未填写子模块）');
+        statFormulas.push({ addr: `C${r}`, f: `SUMIFS(${rngW},${rngA},$A${r},${rngB},$B${r})` });
+        statFormulas.push({ addr: `D${r}`, f: `SUMIFS(${rngO},${rngA},$A${r},${rngB},$B${r})` });
+        statFormulas.push({ addr: `E${r}`, f: `IFERROR(D${r}/C${r},0)` });
+        statFormulas.push({ addr: `F${r}`, f: `COUNTIFS(${rngA},$A${r},${rngB},$B${r})` });
+      });
+      if (pairs.length) {
+        const detailLastRow = detailFirstRow + pairs.length - 1;
+        const sumRow = detailLastRow + 1;
+        put(statGrid, sumRow, 1, '合计');
+        put(statGrid, sumRow, 2, pairs.length + ' 组');
+        statFormulas.push({ addr: `C${sumRow}`, f: `SUM(C${detailFirstRow}:C${detailLastRow})` });
+        statFormulas.push({ addr: `D${sumRow}`, f: `SUM(D${detailFirstRow}:D${detailLastRow})` });
+        statFormulas.push({ addr: `E${sumRow}`, f: `IFERROR(D${sumRow}/C${sumRow},0)` });
+        statFormulas.push({ addr: `F${sumRow}`, f: `SUM(F${detailFirstRow}:F${detailLastRow})` });
+      } else {
+        put(statGrid, detailFirstRow, 1, '（尚未提炼模块信息，请先在 1_电源配置表 填写「模块」「子模块」列）');
+      }
+
+      workbook.SheetNames.push('4-统计');
+      workbook.Sheets['4-统计'] = scSheetFromAoa(statGrid, {
+        cols: [{ wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 14 }],
+        merges: [
+          { s: { r: 0, c: 0 }, e: { r: 0, c: Math.max(totalColIndex, 5) } },
+          { s: { r: 5, c: 0 }, e: { r: 5, c: Math.max(totalColIndex, 5) } },
+          { s: { r: 9, c: 0 }, e: { r: 9, c: Math.max(totalColIndex, 5) } },
+          { s: { r: detailTitleRow - 1, c: 0 }, e: { r: detailTitleRow - 1, c: 5 } },
+        ],
+      });
+      applyFormulas(workbook.Sheets['4-统计'], statFormulas);
+      formatRange(workbook.Sheets['4-统计'], moduleLetters.concat([errorColLetter, totalColLetter]), 4, 4, '0.00');
+      formatRange(workbook.Sheets['4-统计'], moduleLetters.concat([errorColLetter, totalColLetter]), 8, 8, '0.00');
+      formatRange(workbook.Sheets['4-统计'], moduleLetters.concat([errorColLetter, totalColLetter]), 12, 12, '0.0%');
+      formatRange(workbook.Sheets['4-统计'], ['C', 'D'], detailFirstRow, detailFirstRow + Math.max(pairs.length, 1), '0.00');
+      formatRange(workbook.Sheets['4-统计'], ['E'], detailFirstRow, detailFirstRow + Math.max(pairs.length, 1), '0.00%');
+      formatRange(workbook.Sheets['4-统计'], ['F'], detailFirstRow, detailFirstRow + Math.max(pairs.length, 1), '0');
+
       // ---------- 5-测试原始数据 / 6-QEPM原始数据 ----------
-      const channelNames = channels.map((row) => scQepmChannelName(row)).filter(Boolean);
+      // 第 4 行是 EPM 映射，第 5 行留空，第 6 行是各通道均值 → 3_功耗采集数据表 的
+      // HLOOKUP(...,$A$3:$ZZ$9,4,...) 取的就是第 6 行（数组内第 4 行）。
       const testRawAoa = buildQepmSheetAoa(channelNames);
+      testRawAoa.push([]);
+      const avgRow = new Array(testRawAoa[2].length).fill('');
+      avgRow[0] = '均值(AVERAGE)';
+      testRawAoa.push(avgRow);
+      const testRawFormulas = [];
+      for (let c = 2; c <= testRawAoa[2].length; c++) {
+        const letter = XLSX.utils.encode_col(c - 1);
+        testRawFormulas.push({ addr: `${letter}6`, f: `AVERAGE('6-QEPM原始数据'!${letter}5:${letter}100000)` });
+      }
       workbook.SheetNames.push('5-测试原始数据');
       workbook.Sheets['5-测试原始数据'] = scSheetFromAoa(testRawAoa);
+      applyFormulas(workbook.Sheets['5-测试原始数据'], testRawFormulas);
 
-      const qepmAoa = buildQepmSheetAoa(channelNames);
       workbook.SheetNames.push('6-QEPM原始数据');
-      workbook.Sheets['6-QEPM原始数据'] = scSheetFromAoa(qepmAoa, {
+      workbook.Sheets['6-QEPM原始数据'] = scSheetFromAoa(buildQepmSheetAoa(channelNames), {
         cols: [{ wch: 12 }].concat(channelNames.flatMap(() => [{ wch: 14 }, { wch: 14 }, { wch: 12 }])),
       });
 
@@ -7399,7 +7641,7 @@ function bindEvents() {
       box.innerHTML = '<span class="material-symbols-outlined">download_done</span>'
         + '<div class="auto-gen-result-body">'
         + '<strong>已生成：' + escapeHtml(fileName) + '</strong>'
-        + '<small>' + channelCount + ' 条通道 · ' + BREAKDOWN_SHEET_NAMES.length + ' 个 Sheet · ' + escapeHtml(sizeText || '') + '</small>'
+        + '<small>' + channelCount + ' 条通道 · ' + BREAKDOWN_SHEET_NAMES.length + ' 个 Sheet · 统计与效率公式已写入 · ' + escapeHtml(sizeText || '') + '</small>'
         + '</div>';
     }
 
