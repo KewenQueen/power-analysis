@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=20261031a" />
+    <link rel="stylesheet" href="./style.css?v=20261102a" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -592,24 +592,84 @@
             <div class="sampling-channel-heading">
               <div>
                 <h3 id="configGenTitle"><span class="material-symbols-outlined">settings_suggest</span>配置文件生成</h3>
-                <p>基于采样通道梳理与拆解模板，生成可直接下发的配置文件，省去手工誊写。</p>
+                <p>把「采样通道梳理」按 SPM 芯片翻译成 SPMv4 采样配置（.conf）：通道槽位、采样电阻、类别与空槽占位全部自动计算，生成即可直接下发。</p>
               </div>
-              <span class="sampling-channel-badge config-gen-badge" id="configGenBadge">功能待开发</span>
+              <span class="sampling-channel-badge config-gen-badge" id="configGenBadge">待生成</span>
             </div>
 
-            <div class="config-gen-panel">
-              <div class="config-gen-placeholder">
-                <span class="config-gen-placeholder-icon"><span class="material-symbols-outlined">construction</span></span>
-                <div class="config-gen-placeholder-body">
-                  <strong>该功能正在开发中，敬请期待</strong>
-                  <small>上线后可在此按通道列表生成配置文件，并支持按项目单独保存版本。</small>
-                </div>
+            <!-- 数据源：飞书电子表格链接 -->
+            <div class="config-gen-source">
+              <div class="config-gen-source-field">
+                <label for="configGenUrl">
+                  <span class="material-symbols-outlined">link</span>
+                  采样通道云文档链接
+                </label>
+                <input id="configGenUrl" type="url" placeholder="https://xxx.larkoffice.com/sheets/..." autocomplete="off" />
               </div>
-              <button id="configGenBtn" type="button" class="config-gen-btn" data-feature-coming-soon="配置文件生成" title="该功能正在开发中，敬请期待">
-                <span class="material-symbols-outlined">lock</span>
-                <span>生成配置文件</span>
+              <button id="configGenReadBtn" type="button" class="template-btn template-btn-secondary">
+                <span class="material-symbols-outlined text-sm">cloud_download</span>
+                <span class="config-gen-read-label">读取通道</span>
+              </button>
+              <small id="configGenSourceStatus" class="sc-import-status"></small>
+            </div>
+
+            <!-- 生成参数 -->
+            <div class="config-gen-params">
+              <label class="config-gen-field" for="configGenProject">
+                <span>项目名称</span>
+                <input id="configGenProject" type="text" value="DoraG" placeholder="例如：DoraG" autocomplete="off" />
+              </label>
+              <label class="config-gen-field" for="configGenSerial">
+                <span>配置编号（起始）</span>
+                <input id="configGenSerial" type="text" value="J3501" placeholder="例如：J3501" autocomplete="off" />
+              </label>
+              <label class="config-gen-field" for="configGenPlatform">
+                <span>平台 / Target</span>
+                <input id="configGenPlatform" type="text" value="SAR1130P" placeholder="例如：SAR1130P" autocomplete="off" />
+              </label>
+              <label class="config-gen-field" for="configGenDab">
+                <span>DAB</span>
+                <input id="configGenDab" type="text" value="spmv4" placeholder="例如：spmv4" autocomplete="off" />
+              </label>
+            </div>
+
+            <!-- 生成规则 -->
+            <details id="configGenRules" class="config-gen-rules">
+              <summary>
+                <span class="material-symbols-outlined">rule</span>
+                <strong>查看生成规则</strong>
+                <span class="material-symbols-outlined config-gen-rules-chevron">expand_more</span>
+              </summary>
+              <div class="config-gen-rules-body">
+                <ul>
+                  <li>只读取「<strong>采样通道QC</strong>」列的 <code>SPM1_CH07</code> / <code>SPM2_CH42</code> 形式；「采样通道NI」列<strong>不参与</strong>生成。</li>
+                  <li>通道槽位：<code>channel = 32 × (nn % 4) + 2 × ⌊nn / 4⌋</code>，电流通道占 <code>channel</code>，电压通道占 <code>channel + 1</code>。</li>
+                  <li>命名：<code>{SPM}_CH{nn}_{采样通道 NET-}</code>，电流通道追加 <code>_I</code>、电压通道追加 <code>_V</code>；电流通道的 <code>coupling</code> 指向同组电压通道。</li>
+                  <li>电阻：电流通道取「采样电阻」列，电压通道固定 <code>1000</code>；类别按「模块」两位编码映射到 <code>00_VBATT ~ 10_OTHERS</code>。</li>
+                  <li>未占用的 <code>CH00 ~ CH47</code> 自动补 <code>disabled: 1</code> 占位（<code>category: NULL</code>），保证 48 组通道齐全。</li>
+                  <li>固定追加测试通道 <code>SPM_SENSE48 ~ SPM_SENSE63</code> 与 3 个 marker（<code>124 ~ 130</code> 槽位），共 131 条记录 / 芯片。</li>
+                  <li>优先级为「合并 / 不测」或缺少采样电阻、缺少 NET- 的行会被跳过，结果区会列出跳过原因。</li>
+                </ul>
+              </div>
+            </details>
+
+            <!-- 操作 -->
+            <div class="config-gen-actions">
+              <button id="configGenBtn" type="button" class="config-gen-go" disabled>
+                <span class="material-symbols-outlined">auto_awesome</span>
+                <span id="configGenBtnLabel">生成配置文件</span>
+              </button>
+              <button id="configGenDownloadAll" type="button" class="template-btn template-btn-secondary hidden">
+                <span class="material-symbols-outlined text-sm">folder_zip</span>
+                打包下载全部
               </button>
             </div>
+            <p id="configGenHint" class="config-gen-hint">
+              <span class="material-symbols-outlined">error</span>
+              请先粘贴采样通道云文档链接，或在上方录入通道数据
+            </p>
+
+            <div id="configGenResult" class="config-gen-result hidden"></div>
           </section>
             </div>
           </div>
@@ -1186,7 +1246,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="./config.js?v=2026100124"></script>
     <script src="./supabase-auth.js?v=2026100124"></script>
-    <script src="./app.js?v=20261031g"></script>
+    <script src="./app.js?v=20261102a"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

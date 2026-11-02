@@ -6760,6 +6760,10 @@ function bindEvents() {
       const cols = getSamplingChannelOnlineCols();
       const nameMatcher = (value) => normalizeChannelHeader(value);
       const out = [];
+      // 原模板「模块 / 子模块 / tiny模块」是纵向合并单元格，只有块首行有值。
+      // 模块块首行往往没有通道（例如「06_BT SOC」独占一行），会被下面的 filled 过滤跳过，
+      // 所以合并块语义必须在过滤之前就向下填充，否则后续通道会沿用上一块的模块名。
+      const carried = { module: '', sub_module: '', tiny_module: '' };
       for (let r = headerRowIndex + 1; r < rows.length; r += 1) {
         const raw = rows[r] || [];
         const row = {};
@@ -6772,6 +6776,18 @@ function bindEvents() {
           if (text) filled += 1;
         });
         row.priority = normalizeChannelPriority(row.priority);
+        if (row.module) {
+          carried.module = row.module;
+          if (!row.sub_module) { carried.sub_module = ''; carried.tiny_module = ''; }
+        }
+        if (row.sub_module) {
+          carried.sub_module = row.sub_module;
+          if (!row.tiny_module) carried.tiny_module = '';
+        }
+        if (row.tiny_module) carried.tiny_module = row.tiny_module;
+        ['module', 'sub_module', 'tiny_module'].forEach((key) => {
+          if (!row[key]) row[key] = carried[key];
+        });
         if (filled < 2) continue;
         if (!row.module && !row.power_domain && !row.net && !row.net_plus) continue;
         // Guard against a duplicated header row in the middle of the sheet.
@@ -6780,12 +6796,6 @@ function bindEvents() {
         // Guard against summary / footer rows (合计、总计、Total…).
         if (/^(合计|总计|小计|汇总|总功耗|total|sum)/i.test(row.module)
           || /^(合计|总计|小计|汇总|总功耗|total|sum)/i.test(row.power_domain)) continue;
-        // 原模板「模块 / 子模块 / tiny模块」是纵向合并单元格，只有块首行有值。
-        // 这里把合并块的语义还原成“向下填充”，否则 4-统计 的 SUMIFS 会漏掉这些通道。
-        const previous = out.length ? out[out.length - 1] : null;
-        ['module', 'sub_module', 'tiny_module'].forEach((key) => {
-          if (!row[key] && previous && previous[key]) row[key] = previous[key];
-        });
         out.push(row);
       }
       return out;
@@ -8130,6 +8140,9 @@ function bindEvents() {
           : '<span class="material-symbols-outlined">error</span>请先填写采样通道';
       }
       if (badge) badge.textContent = validCount === 0 ? '待生成' : (autoGenDone ? '已生成' : '可生成');
+
+      // 配置文件生成同样依赖这批复用的通道数据，跟着一起刷新可用态
+      if (typeof updateConfigGenAvailability === 'function') updateConfigGenAvailability();
     }
 
     function showAutoGenResult(fileName, channelCount, sizeText) {
@@ -8207,6 +8220,741 @@ function bindEvents() {
       const button = document.getElementById('autoGenBtn');
       if (button) button.addEventListener('click', handleAutoGenClick);
       updateAutoGenAvailability();
+    })();
+
+    // ================================================================
+    // 配置文件生成 —— 采样通道梳理 -> SPMv4 采样配置（.conf）
+    // ================================================================
+    // 与下发参考配置（DoraG_SPM1_J3501.conf / DoraG_SPM2_J3502.conf）保持同一套结构：
+    //   · 每个芯片固定 48 组模拟通道（CH00~CH47），每组一条 I + 一条 V，共 96 条
+    //   · 槽位：bank = nn % 4，slot = ⌊nn / 4⌋，channel = 32 * bank + 2 * slot（I 占 slot，V 占 slot + 1）
+    //   · 名字：{SPM}_CH{nn}_{采样通道 NET-}，I 通道追加 _I、V 通道追加 _V
+    //   · 未被占用的通道补 disabled 占位（category: NULL），保证 48 组齐全
+    //   · 固定追加 16 组测试通道（SPM_SENSE48~63）与 3 个 marker，合计 131 条记录 / 芯片
+    //   · 「采样通道NI」列不参与生成，只认「采样通道QC」列
+    const CONFIG_GEN_OPTIONS_KEY = 'qepm_config_gen_options_v1';
+    const CONFIG_GEN_ANALOG_CHANNELS = 48;
+    const CONFIG_GEN_DEFAULT_PLATFORM = 'SAR1130P';
+    const CONFIG_GEN_DEFAULT_DAB = 'spmv4';
+    const CONFIG_GEN_PACKAGE_DESC = 'QEPM target configuration file package';
+    // 模块两位编码 -> 参考配置里的 category（00_VBAT -> 00_VBATT 等）
+    const CONFIG_GEN_CATEGORY_BY_CODE = {
+      '00': '00_VBATT',
+      '01': '01_PMIC',
+      '02': '02_AR1',
+      '03': '03_MEMORY',
+      '04': '04_WIFI',
+      '05': '05_CAMERA',
+      '06': '06_BES2800',
+      '07': '07_FLASH',
+      '08': '08_AUDIO',
+      '09': '09_SENSOR',
+      '10': '10_OTHERS',
+    };
+    // 每个 bank 的首个测试通道带预期电流描述与 200Ω 采样电阻；其余测试通道 1000Ω
+    const CONFIG_GEN_TEST_CURRENTS = ['1.001', '10.116', '4.953', '0.502'];
+    const CONFIG_GEN_MARKERS = ['PSOC_SPM_MARKER1', 'PSOC_SPM_MARKER2', 'PSOC_APQ_MSM_XO_EN'];
+    // 用 var 声明：bindEvents 里更早的初始化会在本段赋值前调用可用态刷新，需要拿到 undefined 而不是抛 TDZ
+    var configGenState = { rows: [], rowsUrl: '', source: '', busy: false, files: [], packageJson: '', meta: null };
+
+    function configGenFieldValue(id) {
+      const el = document.getElementById(id);
+      return el ? String(el.value == null ? '' : el.value).trim() : '';
+    }
+
+    function configGenSlot(number) {
+      return 32 * (number % 4) + 2 * Math.floor(number / 4);
+    }
+
+    function configGenPad2(value) {
+      return String(value).padStart(2, '0');
+    }
+
+    // 模块文本 -> category：只取开头的两位编码，未知编码返回空串（结果区会提示）
+    function configGenCategory(moduleText) {
+      const text = sanitizeChannelText(moduleText);
+      if (!text) return '';
+      const match = /^0*(\d{1,2})/.exec(text);
+      if (!match) return '';
+      return CONFIG_GEN_CATEGORY_BY_CODE[configGenPad2(Number(match[1]))] || '';
+    }
+
+    // 读取一行里的字段；列定义被自定义改名时按表头文案兜底
+    function configGenRowText(row, key, labelPattern) {
+      const direct = sanitizeChannelText(scText(row, key));
+      if (direct) return direct;
+      if (!labelPattern) return '';
+      const cols = typeof getSamplingChannelOnlineCols === 'function' ? getSamplingChannelOnlineCols() : [];
+      for (let i = 0; i < cols.length; i += 1) {
+        const col = cols[i];
+        if (!col || !col.key || col.key === key) continue;
+        if (!labelPattern.test(String(col.label || ''))) continue;
+        const value = sanitizeChannelText(scText(row, col.key));
+        if (value) return value;
+      }
+      return '';
+    }
+
+    // 支持 SPM1_CH07 / SPM1CH7 / SPM1-CH7 / CH07（无芯片前缀时归到默认芯片）
+    function configGenParseChannel(value, defaultChip) {
+      const text = String(value == null ? '' : value).replace(/[\s_\-－]+/g, '').toUpperCase();
+      if (!text) return null;
+      let match = /^(SPM\d+)CH(\d{1,3})$/.exec(text);
+      if (match) return { chip: match[1], number: Number(match[2]) };
+      match = /^CH(\d{1,3})$/.exec(text);
+      if (match) return { chip: defaultChip || 'SPM1', number: Number(match[1]) };
+      return { invalid: true };
+    }
+
+    // 采样电阻：容忍 20 / 20mΩ / 20 mΩ 这类写法，取值与参考配置一致（mΩ 数值）
+    function configGenParseResistor(value) {
+      const text = String(value == null ? '' : value).replace(/[\s,，]/g, '');
+      const match = /\d+(?:\.\d+)?/.exec(text);
+      if (!match) return NaN;
+      const number = Number(match[0]);
+      return Number.isFinite(number) && number > 0 ? number : NaN;
+    }
+
+    function configGenCompareChip(a, b) {
+      const na = Number((String(a).match(/\d+/) || ['0'])[0]);
+      const nb = Number((String(b).match(/\d+/) || ['0'])[0]);
+      if (na !== nb) return na - nb;
+      return String(a).localeCompare(String(b));
+    }
+
+    // 单条 I 通道（coupling 指向同组 V 通道）
+    function configGenEntryI(entry) {
+      return {
+        category: entry.category,
+        coupling: entry.name + '_V',
+        sense: entry.sense,
+        disabled: entry.disabled,
+        resistor: entry.resistor,
+        gain: 1,
+        channel: entry.channel,
+        chipsel: 0,
+        name: entry.name + '_I',
+        type: 'I',
+        description: entry.description || '',
+      };
+    }
+
+    // 单条 V 通道（占 I 通道的下一个槽位）
+    function configGenEntryV(entry) {
+      return {
+        category: entry.category,
+        description: entry.description || '',
+        disabled: entry.disabled,
+        sense: entry.sense,
+        resistor: entry.resistor,
+        channel: entry.channel + 1,
+        gain: 1,
+        name: entry.name + '_V',
+        type: 'V',
+        chipsel: 0,
+      };
+    }
+
+    // 采样通道行 -> 每个芯片的通道占用表 + 跳过原因
+    function buildConfigGenPlan(rows, options) {
+      const opts = options || {};
+      const defaultChip = opts.defaultChip || 'SPM1';
+      const groups = new Map();
+      const skipped = [];
+      let lastModule = '';
+      let assigned = 0;
+
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        if (!row) return;
+        const moduleText = sanitizeChannelText(scText(row, 'module')) || lastModule;
+        lastModule = moduleText;
+
+        const channelText = configGenRowText(row, 'qc_channel', /采样通道\s*qc|qc\s*通道|^qc/i);
+        if (!channelText) return;   // 没分配采样通道的行（合并项 / 不测 / 空行）直接忽略
+
+        const spec = configGenParseChannel(channelText, defaultChip);
+        if (!spec) return;
+        if (spec.invalid) {
+          skipped.push({ label: channelText, reason: '通道写法无法识别（应为 SPM1_CH07 / SPM2_CH42）' });
+          return;
+        }
+        if (spec.number >= CONFIG_GEN_ANALOG_CHANNELS) {
+          skipped.push({ label: channelText, reason: '通道号超出 CH00~CH47（SPMv4 模拟通道上限）' });
+          return;
+        }
+        const priority = sanitizeChannelText(scText(row, 'priority'));
+        if (/^(合并|不测)/.test(priority)) {
+          skipped.push({ label: channelText, reason: '优先级为「' + priority + '」，不单独占用采样通道' });
+          return;
+        }
+        const netMinus = configGenRowText(row, 'net_minus', /net\s*[-−]|net\s*minus/i);
+        if (!netMinus || /^[-—–/]+$/.test(netMinus)) {
+          skipped.push({ label: channelText, reason: '「采样通道 NET-」为空，无法生成通道名' });
+          return;
+        }
+        const resistorText = configGenRowText(row, 'resistor', /采样电阻|电阻选型|^电阻$|阻值/i);
+        const resistor = configGenParseResistor(resistorText);
+        if (!Number.isFinite(resistor)) {
+          skipped.push({ label: channelText, reason: '「采样电阻」缺失或非法（' + (resistorText || '空') + '）' });
+          return;
+        }
+
+        const chipName = spec.chip;
+        if (!groups.has(chipName)) groups.set(chipName, new Map());
+        const used = groups.get(chipName);
+        if (used.has(spec.number)) {
+          skipped.push({ label: channelText, reason: '通道号重复，保留首次出现的行' });
+          return;
+        }
+        used.set(spec.number, {
+          net: netMinus,
+          resistor: resistor,
+          category: configGenCategory(moduleText),
+          lowResistor: resistor < 1,
+        });
+        assigned += 1;
+      });
+
+      const chips = Array.from(groups.keys()).sort(configGenCompareChip).map((chipName) => {
+        const used = groups.get(chipName);
+        const channels = [];
+        let lowResistors = 0;
+        let uncategorized = 0;
+
+        for (let number = 0; number < CONFIG_GEN_ANALOG_CHANNELS; number += 1) {
+          const slot = configGenSlot(number);
+          const base = chipName + '_CH' + configGenPad2(number) + '_';
+          const hit = used.get(number);
+          if (hit) {
+            if (hit.lowResistor) lowResistors += 1;
+            if (!hit.category) uncategorized += 1;
+            const entry = { category: hit.category, sense: number, disabled: 0, resistor: hit.resistor, channel: slot, name: base + hit.net };
+            channels.push(configGenEntryI(entry));
+            // 与参考配置一致：有效通道的 V 通道固定 1000（I 通道才用采样电阻）
+            channels.push(configGenEntryV({
+              category: entry.category,
+              sense: entry.sense,
+              disabled: entry.disabled,
+              resistor: 1000,
+              channel: entry.channel,
+              name: entry.name,
+            }));
+          } else {
+            // 空槽：与参考配置一致，补 disabled 占位，名字不带网络名
+            const entry = { category: 'NULL', sense: number, disabled: 1, resistor: 1, channel: slot, name: base };
+            channels.push(configGenEntryI(entry));
+            channels.push(configGenEntryV({ category: entry.category, sense: entry.sense, disabled: entry.disabled, resistor: 1000, channel: entry.channel, name: entry.name }));
+          }
+        }
+
+        for (let bank = 0; bank < 4; bank += 1) {
+          for (let index = 0; index < 4; index += 1) {
+            const number = 48 + bank + index * 4;
+            const slot = configGenSlot(number);
+            const isPrimary = index === 0;
+            const description = isPrimary ? 'SPMV4 Test Ch: Expect ' + CONFIG_GEN_TEST_CURRENTS[bank] + 'mA +/- 5%' : '';
+            // 首个测试通道 200Ω；SENSE63 沿用参考配置的 20Ω，其余 1000Ω
+            const resistor = isPrimary ? 200 : (number === 63 ? 20 : 1000);
+            const category = isPrimary ? 'Test Channels' : '';
+            const name = 'SPM_SENSE' + number;
+            channels.push(configGenEntryI({ category: category, sense: number, disabled: 1, resistor: resistor, channel: slot, name: name, description: description }));
+            channels.push(configGenEntryV({ category: category, sense: number, disabled: 1, resistor: 1000, channel: slot, name: name, description: description }));
+          }
+        }
+
+        CONFIG_GEN_MARKERS.forEach((name, index) => {
+          channels.push({ category: '', disabled: 1, description: '', chipsel: 0, name: name, type: 'G', channel: 128 + index });
+        });
+
+        // 与参考配置一致：按 channel 升序排列（0 ~ 130 连续）
+        channels.sort((a, b) => a.channel - b.channel);
+
+        return {
+          name: chipName,
+          used: used.size,
+          empty: CONFIG_GEN_ANALOG_CHANNELS - used.size,
+          records: channels.length,
+          channels: channels,
+          lowResistors: lowResistors,
+          uncategorized: uncategorized,
+        };
+      });
+
+      return { chips: chips, skipped: skipped, assigned: assigned };
+    }
+
+    function configGenSerialAt(base, offset) {
+      const text = String(base == null ? '' : base).trim();
+      if (!text) return '';
+      const match = /^(.*?)(\d+)$/.exec(text);
+      if (!match) return offset ? text + '_' + (offset + 1) : text;
+      const prefix = match[1];
+      const digits = match[2];
+      return prefix + String(Number(digits) + offset).padStart(digits.length, '0');
+    }
+
+    function configGenLabel(project, chip, serial) {
+      return [project, chip, serial]
+        .map((part) => String(part == null ? '' : part).trim())
+        .filter(Boolean)
+        .join('_')
+        .replace(/[\\/:*?"<>|\s]+/g, '_');
+    }
+
+    function configGenDateStamp(date) {
+      const pad = (value) => String(value).padStart(2, '0');
+      return pad(date.getMonth() + 1) + '/' + pad(date.getDate()) + '/' + String(date.getFullYear()).slice(-2)
+        + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
+    }
+
+    // 参考配置里的 JSON 缩进是 1 个空格
+    function configGenStringify(payload) {
+      return JSON.stringify(payload, null, 1) + '\n';
+    }
+
+    function buildConfigGenFiles(plan, options) {
+      const opts = options || {};
+      return plan.chips.map((chip, index) => {
+        const label = configGenLabel(opts.project, chip.name, configGenSerialAt(opts.serial, index));
+        const content = {
+          label: label,
+          target: opts.platform,
+          description: label,
+          platform: opts.platform,
+          dab: opts.dab,
+          version: 6,
+          channels: chip.channels,
+        };
+        return {
+          chip: chip.name,
+          label: label,
+          fileName: 'custom/' + label + '.conf',
+          used: chip.used,
+          empty: chip.empty,
+          records: chip.records,
+          lowResistors: chip.lowResistors,
+          uncategorized: chip.uncategorized,
+          content: content,
+        };
+      });
+    }
+
+    function buildConfigGenPackage(files) {
+      return {
+        files: files.map((file) => ({ fileName: file.fileName, content: file.content })),
+        date: configGenDateStamp(new Date()),
+        description: CONFIG_GEN_PACKAGE_DESC,
+      };
+    }
+
+    function setConfigGenSourceStatus(text, tone, hint) {
+      const statusEl = document.getElementById('configGenSourceStatus');
+      if (!statusEl) return;
+      statusEl.textContent = text || '';
+      statusEl.dataset.tone = tone || '';
+      if (hint) statusEl.title = hint;
+      else statusEl.removeAttribute('title');
+    }
+
+    function describeConfigGenError(error) {
+      const code = error && error.code;
+      if (code === 'NO_CHANNEL') return '未解析到任何 SPM 通道，请确认「采样通道QC」列填的是 SPM1_CH07 形式';
+      return describeCloudImportError(error);
+    }
+
+    // 读取云文档：先在默认/指定工作表找表头，找不到再依次试其它可见工作表
+    function readConfigGenSheet(rawUrl) {
+      const direct = parseCloudDocLink(rawUrl);
+      if (!direct || direct.error) {
+        const code = (direct && direct.error) || 'EMPTY';
+        return Promise.reject(Object.assign(new Error(describeCloudImportError({ code: code })), { code: code }));
+      }
+      const token = direct.token;
+      const tryParse = (values) => {
+        const matrix = Array.isArray(values) ? values : [];
+        const header = detectChannelHeaderRow(matrix);
+        if (!header) return null;
+        const rows = buildChannelRowsFromMatrix(matrix, header.rowIndex, header.map);
+        return rows.length ? rows : null;
+      };
+      const request = (sheetId) => callFeishuSheetProxy({ action: 'read', spreadsheetToken: token, sheetId: sheetId || '' });
+
+      return request(direct.sheetId).then((first) => {
+        const meta = first.sheet || {};
+        const rows = tryParse(first.values);
+        if (rows) {
+          return { rows: rows, sheetTitle: meta.title || '云文档', sheetId: meta.sheetId || '', sheets: first.sheets || [] };
+        }
+        const tried = {};
+        tried[meta.sheetId || ''] = true;
+        const others = (Array.isArray(first.sheets) ? first.sheets : [])
+          .filter((sheet) => sheet && !sheet.hidden && sheet.sheetId && !tried[sheet.sheetId])
+          .slice(0, 3);
+        const chain = others.reduce((promise, sheet) => promise.then((found) => {
+          if (found) return found;
+          return request(sheet.sheetId).then((res) => {
+            const parsed = tryParse(res.values);
+            if (!parsed) return null;
+            const resMeta = res.sheet || sheet;
+            return { rows: parsed, sheetTitle: resMeta.title || sheet.title || '云文档', sheetId: resMeta.sheetId || sheet.sheetId, sheets: first.sheets || [] };
+          });
+        }), Promise.resolve(null));
+        return chain.then((found) => {
+          if (found) return found;
+          throw Object.assign(new Error('未识别到采样通道表头'), { code: 'NO_HEADER' });
+        });
+      });
+    }
+
+    async function handleConfigGenRead() {
+      const url = configGenFieldValue('configGenUrl');
+      if (!url) {
+        setConfigGenSourceStatus('请先粘贴采样通道云文档链接', 'error');
+        const input = document.getElementById('configGenUrl');
+        if (input) input.focus();
+        return;
+      }
+      if (configGenState.busy) return;
+      const readBtn = document.getElementById('configGenReadBtn');
+      configGenState.busy = true;
+      if (readBtn) {
+        readBtn.disabled = true;
+        readBtn.classList.add('is-busy');
+      }
+      setConfigGenSourceStatus('正在读取云文档…', 'loading');
+      try {
+        const res = await readConfigGenSheet(url);
+        configGenState.rows = res.rows;
+        configGenState.rowsUrl = url;
+        configGenState.source = res.sheetTitle;
+        setConfigGenSourceStatus('已读取「' + res.sheetTitle + '」的 ' + res.rows.length + ' 条记录', 'success');
+      } catch (error) {
+        configGenState.rows = [];
+        configGenState.rowsUrl = '';
+        configGenState.source = '';
+        setConfigGenSourceStatus(describeConfigGenError(error), 'error');
+      } finally {
+        configGenState.busy = false;
+        if (readBtn) {
+          readBtn.disabled = false;
+          readBtn.classList.remove('is-busy');
+        }
+        updateConfigGenAvailability();
+      }
+    }
+
+    async function handleConfigGenGenerate() {
+      const button = document.getElementById('configGenBtn');
+      if (!button || configGenState.busy) return;
+      const url = configGenFieldValue('configGenUrl');
+      const project = configGenFieldValue('configGenProject');
+      const serial = configGenFieldValue('configGenSerial');
+      const platform = configGenFieldValue('configGenPlatform') || CONFIG_GEN_DEFAULT_PLATFORM;
+      const dab = configGenFieldValue('configGenDab') || CONFIG_GEN_DEFAULT_DAB;
+
+      configGenState.busy = true;
+      const label = document.getElementById('configGenBtnLabel');
+      if (label) label.textContent = '正在生成…';
+      button.disabled = true;
+      button.classList.remove('is-ready');
+      try {
+        let rows = configGenState.rows;
+        // 填了链接就以云文档为准（链接没变且已读过则复用缓存，避免重复取数）
+        if (url && (url !== configGenState.rowsUrl || !rows.length)) {
+          try {
+            const res = await readConfigGenSheet(url);
+            rows = res.rows;
+            configGenState.rows = rows;
+            configGenState.rowsUrl = url;
+            configGenState.source = res.sheetTitle;
+            setConfigGenSourceStatus('已读取「' + res.sheetTitle + '」的 ' + rows.length + ' 条记录', 'success');
+          } catch (error) {
+            // 网络抖动时不至于白跑一遍：优先复用已缓存的同源数据，否则再退回已录入的通道
+            if (!rows.length && url === configGenState.rowsUrl) rows = configGenState.rows.slice();
+            let fallbackNote = '';
+            if (!rows.length) {
+              const fallback = (state.samplingChannelOnlineRows || []).slice();
+              if (fallback.length) {
+                rows = fallback;
+                fallbackNote = '云文档读取失败，已改用上方录入的 ' + rows.length + ' 条通道数据生成';
+              }
+            }
+            if (!rows.length) throw error;
+            setConfigGenSourceStatus(fallbackNote || '云文档读取失败，已改用缓存的通道数据生成', 'error', describeConfigGenError(error));
+          }
+        }
+        if (!rows.length) rows = state.samplingChannelOnlineRows.slice();
+        if (!rows.length) throw Object.assign(new Error('没有可用的采样通道数据'), { code: 'NO_ROWS' });
+
+        const plan = buildConfigGenPlan(rows, { defaultChip: 'SPM1' });
+        if (!plan.chips.length) throw Object.assign(new Error('未解析到 SPM 通道'), { code: 'NO_CHANNEL' });
+
+        const files = buildConfigGenFiles(plan, { project: project, serial: serial, platform: platform, dab: dab });
+        const date = configGenDateStamp(new Date());
+        files.forEach((file) => {
+          file.json = configGenStringify({
+            files: [{ fileName: file.fileName, content: file.content }],
+            date: date,
+            description: CONFIG_GEN_PACKAGE_DESC,
+          });
+        });
+        configGenState.files = files;
+        configGenState.packageJson = configGenStringify(buildConfigGenPackage(files));
+        configGenState.meta = { project: project, serial: serial, platform: platform, dab: dab, date: date };
+        renderConfigGenResult({ files: files, plan: plan });
+
+        const badge = document.getElementById('configGenBadge');
+        if (badge) {
+          badge.textContent = '已生成 ' + files.length + ' 个';
+          badge.classList.remove('is-ready');
+          badge.classList.add('is-done');
+        }
+        const allBtn = document.getElementById('configGenDownloadAll');
+        if (allBtn) allBtn.classList.remove('hidden');
+        persistConfigGenOptions({ project: project, serial: serial, platform: platform, dab: dab });
+      } catch (error) {
+        renderConfigGenError(describeConfigGenError(error));
+      } finally {
+        configGenState.busy = false;
+        if (label) label.textContent = '生成配置文件';
+        updateConfigGenAvailability();
+      }
+    }
+
+    function renderConfigGenError(message) {
+      const box = document.getElementById('configGenResult');
+      if (!box) return;
+      box.innerHTML = '<div class="config-gen-error"><span class="material-symbols-outlined">error</span>'
+        + escapeHtml(message) + '</div>';
+      box.classList.remove('hidden');
+    }
+
+    function renderConfigGenResult(result) {
+      const box = document.getElementById('configGenResult');
+      if (!box) return;
+      const files = result.files || [];
+      const plan = result.plan || { chips: [], skipped: [] };
+      const usedTotal = files.reduce((sum, file) => sum + file.used, 0);
+      const emptyTotal = files.reduce((sum, file) => sum + file.empty, 0);
+      const recordTotal = files.reduce((sum, file) => sum + file.records, 0);
+      const lowResistorTotal = files.reduce((sum, file) => sum + (file.lowResistors || 0), 0);
+      const uncategorizedTotal = files.reduce((sum, file) => sum + (file.uncategorized || 0), 0);
+      const occupancy = files.map((file) => file.chip + ' ' + file.used + '/' + CONFIG_GEN_ANALOG_CHANNELS).join(' · ');
+
+      const stats = '<div class="config-gen-summary">'
+        + '<span class="config-gen-stat"><b>' + files.length + '</b> 个配置文件</span>'
+        + '<span class="config-gen-stat"><b>' + usedTotal + '</b> 组有效通道</span>'
+        + '<span class="config-gen-stat"><b>' + recordTotal + '</b> 条通道记录</span>'
+        + (emptyTotal ? '<span class="config-gen-stat is-warn"><b>' + emptyTotal + '</b> 个空槽已占位</span>' : '')
+        + (plan.skipped.length ? '<span class="config-gen-stat is-warn"><b>' + plan.skipped.length + '</b> 行已跳过</span>' : '')
+        + '</div>';
+
+      const cards = files.map((file, index) => (
+        '<article class="config-file-card">'
+        + '<div class="config-file-head">'
+        + '<span class="config-file-icon"><span class="material-symbols-outlined">description</span></span>'
+        + '<div class="config-file-title">'
+        + '<strong>' + escapeHtml(file.fileName) + '</strong>'
+        + '<small>' + escapeHtml(file.chip) + ' · 有效 ' + file.used + '/' + CONFIG_GEN_ANALOG_CHANNELS
+        + ' 组 · 空槽 ' + file.empty + ' 组 · 共 ' + file.records + ' 条</small>'
+        + '</div>'
+        + '</div>'
+        + '<div class="config-file-actions">'
+        + '<button type="button" class="config-file-download" data-cfg-action="download" data-cfg-index="' + index + '">'
+        + '<span class="material-symbols-outlined">download</span>下载 .conf</button>'
+        + '<button type="button" data-cfg-action="copy" data-cfg-index="' + index + '">'
+        + '<span class="material-symbols-outlined">content_copy</span>复制</button>'
+        + '<button type="button" data-cfg-action="preview" data-cfg-index="' + index + '">'
+        + '<span class="material-symbols-outlined">code</span>预览</button>'
+        + '</div>'
+        + '<pre class="config-file-preview hidden" data-cfg-preview="' + index + '"></pre>'
+        + '</article>'
+      )).join('');
+
+      const notes = [];
+      if (occupancy) notes.push('通道占用：' + occupancy);
+      if (lowResistorTotal) notes.push(lowResistorTotal + ' 组采样电阻小于 1，请确认单位是否为 mΩ');
+      if (uncategorizedTotal) notes.push(uncategorizedTotal + ' 组未匹配到标准模块编码（category 为空）');
+
+      let warns = '';
+      if (plan.skipped.length) {
+        const shown = plan.skipped.slice(0, 20);
+        const rest = plan.skipped.length - shown.length;
+        warns = '<div class="config-gen-warns">'
+          + '<strong><span class="material-symbols-outlined">warning</span>以下行未参与生成</strong>'
+          + '<ul>'
+          + shown.map((item) => '<li>' + escapeHtml(item.label) + '：' + escapeHtml(item.reason) + '</li>').join('')
+          + (rest > 0 ? '<li>… 还有 ' + rest + ' 行未列出</li>' : '')
+          + '</ul></div>';
+      }
+
+      box.innerHTML = stats
+        + '<div class="config-file-list">' + cards + '</div>'
+        + (notes.length
+          ? '<p class="config-gen-hint"><span class="material-symbols-outlined">info</span>' + escapeHtml(notes.join('；')) + '</p>'
+          : '')
+        + warns;
+      box.classList.remove('hidden');
+    }
+
+    function downloadConfigGenText(text, fileName) {
+      const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 1000);
+    }
+
+    function copyConfigGenText(text, button) {
+      const feedback = () => {
+        if (!button) return;
+        const original = button.innerHTML;
+        button.innerHTML = '<span class="material-symbols-outlined">check</span>已复制';
+        setTimeout(() => { button.innerHTML = original; }, 1200);
+      };
+      const fallback = () => {
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        try { document.execCommand('copy'); feedback(); } catch (error) { /* ignore */ }
+        area.remove();
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(feedback).catch(fallback);
+      } else {
+        fallback();
+      }
+    }
+
+    function handleConfigGenResultClick(event) {
+      const target = event.target;
+      const button = target && target.closest ? target.closest('button[data-cfg-action]') : null;
+      if (!button) return;
+      const index = Number(button.dataset.cfgIndex);
+      const file = configGenState.files[index];
+      if (!file) return;
+      const action = button.dataset.cfgAction;
+      if (action === 'download') {
+        downloadConfigGenText(file.json, file.fileName.split('/').pop());
+        return;
+      }
+      if (action === 'copy') {
+        copyConfigGenText(file.json, button);
+        return;
+      }
+      if (action === 'preview') {
+        const box = document.querySelector('[data-cfg-preview="' + index + '"]');
+        if (!box) return;
+        const hidden = box.classList.toggle('hidden');
+        if (hidden) return;
+        const lines = file.json.split('\n');
+        box.textContent = lines.length > 240
+          ? lines.slice(0, 240).join('\n') + '\n… 共 ' + lines.length + ' 行，完整内容请下载文件'
+          : file.json;
+      }
+    }
+
+    function downloadAllConfigGenFiles() {
+      const files = configGenState.files;
+      if (!files.length) return;
+      const json = configGenState.packageJson || configGenStringify(buildConfigGenPackage(files));
+      const project = configGenState.meta && configGenState.meta.project ? configGenState.meta.project : 'QEPM';
+      const safe = project.replace(/[\\/:*?"<>|\s]+/g, '_') || 'QEPM';
+      downloadConfigGenText(json, safe + '_config_package.json');
+    }
+
+    function persistConfigGenOptions(options) {
+      try { localStorage.setItem(CONFIG_GEN_OPTIONS_KEY, JSON.stringify(options)); } catch (error) { /* ignore */ }
+    }
+
+    function restoreConfigGenOptions() {
+      let saved = null;
+      try {
+        const raw = localStorage.getItem(CONFIG_GEN_OPTIONS_KEY);
+        if (raw) saved = JSON.parse(raw);
+      } catch (error) { saved = null; }
+      if (!saved) return;
+      [['configGenProject', saved.project], ['configGenSerial', saved.serial], ['configGenPlatform', saved.platform], ['configGenDab', saved.dab]]
+        .forEach((pair) => {
+          const el = document.getElementById(pair[0]);
+          if (el && pair[1]) el.value = pair[1];
+        });
+    }
+
+    function updateConfigGenAvailability() {
+      const button = document.getElementById('configGenBtn');
+      if (!button) return;
+      // 页面上更早的初始化会先调到这里，此时 configGenState 还可能没赋值（见上方 var 声明说明）
+      const cfg = configGenState || { rows: [], files: [], busy: false, source: '' };
+      const url = configGenFieldValue('configGenUrl');
+      const cached = cfg.rows.length;
+      const online = state.samplingChannelOnlineRows.length;
+      const ready = Boolean(url) || cached > 0 || online > 0;
+      const label = document.getElementById('configGenBtnLabel');
+      const hint = document.getElementById('configGenHint');
+      const badge = document.getElementById('configGenBadge');
+
+      button.disabled = !ready || cfg.busy;
+      button.classList.toggle('is-ready', ready && !cfg.busy);
+      if (label) {
+        const count = cached || online;
+        label.textContent = count ? '生成配置文件（' + count + ' 条记录）' : '生成配置文件';
+      }
+      if (hint) {
+        hint.classList.toggle('is-ready', ready);
+        if (!ready) {
+          hint.innerHTML = '<span class="material-symbols-outlined">error</span>请先粘贴采样通道云文档链接，或在上方录入通道数据';
+        } else if (cached) {
+          hint.innerHTML = '<span class="material-symbols-outlined">check_circle</span>已读取「' + escapeHtml(cfg.source || '云文档')
+            + '」，生成后按 SPM 芯片拆分输出 .conf';
+        } else if (url) {
+          hint.innerHTML = '<span class="material-symbols-outlined">check_circle</span>生成时会实时读取该链接的采样通道数据';
+        } else {
+          hint.innerHTML = '<span class="material-symbols-outlined">check_circle</span>将使用上方「采样通道梳理」已录入的 ' + online + ' 条记录生成';
+        }
+      }
+      if (badge && !cfg.files.length) {
+        badge.textContent = ready ? '可生成' : '待生成';
+        badge.classList.toggle('is-ready', ready);
+      }
+    }
+
+    (function initConfigGenPanel() {
+      const urlInput = document.getElementById('configGenUrl');
+      const readBtn = document.getElementById('configGenReadBtn');
+      const genBtn = document.getElementById('configGenBtn');
+      const allBtn = document.getElementById('configGenDownloadAll');
+      const resultBox = document.getElementById('configGenResult');
+      restoreConfigGenOptions();
+      if (urlInput) {
+        urlInput.addEventListener('input', () => {
+          // 链接变了：之前读到的缓存不再代表当前来源
+          if (urlInput.value.trim() !== configGenState.rowsUrl) {
+            configGenState.rows = [];
+            configGenState.rowsUrl = '';
+            configGenState.source = '';
+            setConfigGenSourceStatus('', '');
+          }
+          updateConfigGenAvailability();
+        });
+        urlInput.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          handleConfigGenRead();
+        });
+      }
+      if (readBtn) readBtn.addEventListener('click', handleConfigGenRead);
+      if (genBtn) genBtn.addEventListener('click', handleConfigGenGenerate);
+      if (allBtn) allBtn.addEventListener('click', downloadAllConfigGenFiles);
+      if (resultBox) resultBox.addEventListener('click', handleConfigGenResultClick);
+      updateConfigGenAvailability();
     })();
 
     // Local document import wiring.
