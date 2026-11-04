@@ -2442,6 +2442,22 @@ body.col-resizing {
   outline: none;
 }
 .config-gen-field input:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129, 140, 248, .12); }
+.config-gen-required { color: #e11d48; font-style: normal; font-weight: 800; }
+.config-gen-field.is-invalid input {
+  border-color: #fb7185;
+  background: #fff5f6;
+  box-shadow: 0 0 0 3px rgba(251, 113, 133, .14);
+}
+.config-gen-param-error {
+  margin: .5rem 0 0;
+  padding: .45rem .6rem;
+  border: 1px solid #fecdd3;
+  border-radius: .55rem;
+  background: #fff1f2;
+  color: #be123c;
+  font-size: .66rem;
+  font-weight: 700;
+}
 
 /* 规则说明 */
 .config-gen-rules { margin-top: .55rem; border: 1px solid #e2e8f0; border-radius: .7rem; background: #fff; }

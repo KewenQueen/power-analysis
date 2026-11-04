@@ -8234,8 +8234,6 @@ function bindEvents() {
     //   · 「采样通道NI」列不参与生成，只认「采样通道QC」列
     const CONFIG_GEN_OPTIONS_KEY = 'qepm_config_gen_options_v1';
     const CONFIG_GEN_ANALOG_CHANNELS = 48;
-    const CONFIG_GEN_DEFAULT_PLATFORM = 'SAR1130P';
-    const CONFIG_GEN_DEFAULT_DAB = 'spmv4';
     const CONFIG_GEN_PACKAGE_DESC = 'QEPM target configuration file package';
     // 模块两位编码 -> 参考配置里的 category（00_VBAT -> 00_VBATT 等）
     const CONFIG_GEN_CATEGORY_BY_CODE = {
@@ -8254,12 +8252,57 @@ function bindEvents() {
     // 每个 bank 的首个测试通道带预期电流描述与 200Ω 采样电阻；其余测试通道 1000Ω
     const CONFIG_GEN_TEST_CURRENTS = ['1.001', '10.116', '4.953', '0.502'];
     const CONFIG_GEN_MARKERS = ['PSOC_SPM_MARKER1', 'PSOC_SPM_MARKER2', 'PSOC_APQ_MSM_XO_EN'];
+    // 生成前必填的四项参数：缺任何一项都拦下，不产出文件
+    const CONFIG_GEN_REQUIRED_FIELDS = [
+      { id: 'configGenProject', label: '项目名称' },
+      { id: 'configGenSerial', label: '采集卡位号' },
+      { id: 'configGenPlatform', label: '平台 / Target' },
+      { id: 'configGenDab', label: 'DAB' },
+    ];
     // 用 var 声明：bindEvents 里更早的初始化会在本段赋值前调用可用态刷新，需要拿到 undefined 而不是抛 TDZ
     var configGenState = { rows: [], rowsUrl: '', source: '', busy: false, files: [], packageJson: '', meta: null };
 
     function configGenFieldValue(id) {
       const el = document.getElementById(id);
       return el ? String(el.value == null ? '' : el.value).trim() : '';
+    }
+
+    // 四项生成参数校验：空项标红 + 汇总提示，返回第一个待填写输入框用于聚焦
+    function validateConfigGenParams() {
+      const missing = [];
+      let firstInput = null;
+      CONFIG_GEN_REQUIRED_FIELDS.forEach((field) => {
+        const input = document.getElementById(field.id);
+        if (!input) return;
+        const empty = !String(input.value == null ? '' : input.value).trim();
+        const wrap = input.closest ? input.closest('.config-gen-field') : null;
+        if (wrap) wrap.classList.toggle('is-invalid', empty);
+        if (empty) {
+          missing.push(field.label);
+          if (!firstInput) firstInput = input;
+        }
+      });
+      return { ok: missing.length === 0, missing: missing, firstInput: firstInput };
+    }
+
+    function showConfigGenParamError(missing) {
+      const box = document.getElementById('configGenParamError');
+      if (!box) return;
+      box.textContent = '请先填写必填项：' + (missing || []).join('、');
+      box.classList.remove('hidden');
+    }
+
+    function clearConfigGenParamError() {
+      const box = document.getElementById('configGenParamError');
+      if (box) {
+        box.textContent = '';
+        box.classList.add('hidden');
+      }
+      CONFIG_GEN_REQUIRED_FIELDS.forEach((field) => {
+        const input = document.getElementById(field.id);
+        const wrap = input && input.closest ? input.closest('.config-gen-field') : null;
+        if (wrap) wrap.classList.remove('is-invalid');
+      });
     }
 
     function configGenSlot(number) {
@@ -8646,11 +8689,19 @@ function bindEvents() {
     async function handleConfigGenGenerate() {
       const button = document.getElementById('configGenBtn');
       if (!button || configGenState.busy) return;
+      // 四项参数必填：任一为空就拦下，不读文档、不生成文件
+      const params = validateConfigGenParams();
+      if (!params.ok) {
+        showConfigGenParamError(params.missing);
+        if (params.firstInput) params.firstInput.focus();
+        return;
+      }
+      clearConfigGenParamError();
       const url = configGenFieldValue('configGenUrl');
       const project = configGenFieldValue('configGenProject');
       const serial = configGenFieldValue('configGenSerial');
-      const platform = configGenFieldValue('configGenPlatform') || CONFIG_GEN_DEFAULT_PLATFORM;
-      const dab = configGenFieldValue('configGenDab') || CONFIG_GEN_DEFAULT_DAB;
+      const platform = configGenFieldValue('configGenPlatform');
+      const dab = configGenFieldValue('configGenDab');
 
       configGenState.busy = true;
       const label = document.getElementById('configGenBtnLabel');
@@ -8954,6 +9005,16 @@ function bindEvents() {
       if (genBtn) genBtn.addEventListener('click', handleConfigGenGenerate);
       if (allBtn) allBtn.addEventListener('click', downloadAllConfigGenFiles);
       if (resultBox) resultBox.addEventListener('click', handleConfigGenResultClick);
+      // 必填项一旦补上就撤掉红框；全部填完隐藏汇总提示
+      CONFIG_GEN_REQUIRED_FIELDS.forEach((field) => {
+        const input = document.getElementById(field.id);
+        if (!input) return;
+        input.addEventListener('input', () => {
+          const wrap = input.closest ? input.closest('.config-gen-field') : null;
+          if (wrap && input.value.trim()) wrap.classList.remove('is-invalid');
+          if (validateConfigGenParams().ok) clearConfigGenParamError();
+        });
+      });
       updateConfigGenAvailability();
     })();
 
