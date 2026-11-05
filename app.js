@@ -251,6 +251,8 @@ function clearTransientCaches() {
       'sampling_channel_columns_v1',
       'device_power_db_menu_v1',
       'device_power_db_data_v1',
+      // 配置文件生成的四项参数（项目名 / 采集卡位号 / 平台 / DAB），刷新后要能复现
+      'qepm_config_gen_options_v1',
     ]);
     const keepValues = {};
     keepKeys.forEach((key) => {
@@ -9013,6 +9015,13 @@ function bindEvents() {
           const wrap = input.closest ? input.closest('.config-gen-field') : null;
           if (wrap && input.value.trim()) wrap.classList.remove('is-invalid');
           if (validateConfigGenParams().ok) clearConfigGenParamError();
+          // 手填的值随时记住，刷新后还能复现
+          persistConfigGenOptions({
+            project: configGenFieldValue('configGenProject'),
+            serial: configGenFieldValue('configGenSerial'),
+            platform: configGenFieldValue('configGenPlatform'),
+            dab: configGenFieldValue('configGenDab'),
+          });
         });
       });
       updateConfigGenAvailability();
