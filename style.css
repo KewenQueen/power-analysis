@@ -2461,6 +2461,28 @@ body.col-resizing {
 }
 .config-gen-field input:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129, 140, 248, .12); }
 .config-gen-required { color: #e11d48; font-style: normal; font-weight: 800; }
+/* DAB 固定值：只读输入框 + 锁定标签 */
+.config-gen-fixed-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: .15rem;
+  font-style: normal;
+  color: #4338ca;
+  background: #eef2ff;
+  border-radius: 999px;
+  padding: .05rem .4rem;
+  font-size: .58rem;
+  font-weight: 800;
+}
+.config-gen-fixed-tag .material-symbols-outlined { font-size: .75rem; }
+.config-gen-field input[readonly] {
+  background: #f1f5f9;
+  color: #475569;
+  border-style: dashed;
+  cursor: not-allowed;
+  font-weight: 800;
+}
+.config-gen-field input[readonly]:focus { border-color: #cbd5e1; box-shadow: none; }
 .config-gen-field.is-invalid input {
   border-color: #fb7185;
   background: #fff5f6;

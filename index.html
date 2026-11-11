@@ -22,7 +22,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=20261111d" />
+    <link rel="stylesheet" href="./style.css?v=20261111g" />
+    <link rel="stylesheet" href="./endurance.css?v=20261111g" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -239,8 +240,8 @@
         <button type="button" class="feature-entry-card feature-entry-slate" data-feature-target="enduranceStatusPage">
           <span class="feature-entry-icon"><span class="material-symbols-outlined">monitoring</span></span>
           <span class="feature-entry-content">
-            <strong>续航/功耗现状<span class="feature-dev-badge">开发中</span></strong>
-            <small>查看当前项目的续航与功耗实测现状</small>
+            <strong>续航/功耗现状</strong>
+            <small>按项目统计场景功耗与 DOU，自定义续航模型并横向对比</small>
           </span>
           <span class="material-symbols-outlined feature-entry-arrow">arrow_forward</span>
         </button>
@@ -610,8 +611,8 @@
                 <input id="configGenPlatform" type="text" placeholder="示例：SAR1130P" autocomplete="off" required aria-required="true" />
               </label>
               <label class="config-gen-field" for="configGenDab">
-                <span>DAB <i class="config-gen-required">*</i></span>
-                <input id="configGenDab" type="text" placeholder="示例：spmv4" autocomplete="off" required aria-required="true" />
+                <span>DAB <em class="config-gen-fixed-tag"><span class="material-symbols-outlined">lock</span>固定值</em></span>
+                <input id="configGenDab" type="text" value="spmv4" readonly aria-readonly="true" aria-label="DAB 固定为 spmv4" />
               </label>
             </div>
 
@@ -1217,17 +1218,11 @@
             <span class="material-symbols-outlined text-sm">arrow_back</span> 返回主页面
           </button>
           <div>
-            <h2>续航/功耗现状 <span class="feature-dev-badge">开发中</span></h2>
-            <p>查看当前项目的续航与功耗实测现状。</p>
+            <h2>续航/功耗现状</h2>
+            <p>按项目统计场景功耗与 DOU，维护电池参数、场景电流台账与自定义续航模型，并支持多项目横向对比。</p>
           </div>
         </div>
-        <div class="panel panel-compact rounded-3xl p-4">
-          <div class="feature-placeholder">
-            <span class="feature-placeholder-icon"><span class="material-symbols-outlined">monitoring</span></span>
-            <h3>功能开发中</h3>
-            <p>该模块正在建设中，后续将汇总实测功耗数据，展示各项目续航表现与功耗基线对比。</p>
-          </div>
-        </div>
+        <div id="enduranceStatusRoot"></div>
       </section>
     </main>
     </div>
@@ -1243,7 +1238,8 @@
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="./config.js?v=2026100124"></script>
     <script src="./supabase-auth.js?v=2026100124"></script>
-    <script src="./app.js?v=20261111d"></script>
+    <script src="./app.js?v=20261111g"></script>
+    <script src="./endurance.js?v=20261111g"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

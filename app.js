@@ -253,6 +253,8 @@ function clearTransientCaches() {
       'device_power_db_data_v1',
       // 配置文件生成的四项参数（项目名 / 采集卡位号 / 平台 / DAB），刷新后要能复现
       'qepm_config_gen_options_v1',
+      // 续航/功耗现状：项目、电池参数、场景电流台账与自定义续航模型
+      'endurance_status_v1',
     ]);
     const keepValues = {};
     keepKeys.forEach((key) => {
@@ -8098,11 +8100,13 @@ function bindEvents() {
     // 每个 bank 的首个测试通道带预期电流描述与 200Ω 采样电阻；其余测试通道 1000Ω
     const CONFIG_GEN_TEST_CURRENTS = ['1.001', '10.116', '4.953', '0.502'];
     const CONFIG_GEN_MARKERS = ['PSOC_SPM_MARKER1', 'PSOC_SPM_MARKER2', 'PSOC_APQ_MSM_XO_EN'];
-    // 生成前必填的静态三项；采集卡位号是按识别到的 SPM 芯片动态渲染的，单独校验
+    // DAB 为固定值，用户不可编辑；生成与持久化统一使用该常量（全小写）
+    const CONFIG_GEN_DAB_FIXED = 'spmv4';
+    // 生成前必填的静态项；采集卡位号是按识别到的 SPM 芯片动态渲染的，单独校验。
+    // DAB 固定 spmv4 无需用户填写，不纳入必填校验。
     const CONFIG_GEN_REQUIRED_FIELDS = [
       { id: 'configGenProject', label: '项目名称' },
       { id: 'configGenPlatform', label: '平台 / Target' },
-      { id: 'configGenDab', label: 'DAB' },
     ];
     // 用 var 声明：bindEvents 里更早的初始化会在本段赋值前调用可用态刷新，需要拿到 undefined 而不是抛 TDZ
     var configGenState = { busy: false, files: [], packageJson: '', meta: null };
@@ -8124,7 +8128,7 @@ function bindEvents() {
       return root ? Array.from(root.querySelectorAll('.config-gen-serial-input')) : [];
     }
 
-    // 生成参数校验：静态三项 + 每个已识别 SPM 芯片的卡位号；空项标红 + 汇总提示，返回第一个待填写输入框用于聚焦
+    // 生成参数校验：静态两项（项目名称、平台 / Target）+ 每个已识别 SPM 芯片的卡位号；空项标红 + 汇总提示，返回第一个待填写输入框用于聚焦
     function validateConfigGenParams() {
       const missing = [];
       let firstInput = null;
@@ -8529,7 +8533,7 @@ function bindEvents() {
     async function handleConfigGenGenerate() {
       const button = document.getElementById('configGenBtn');
       if (!button || configGenState.busy) return;
-      // 必填参数：静态三项 + 每个已识别 SPM 芯片的卡位号，任一为空就拦下，不生成文件
+      // 必填参数：静态两项（项目名称、平台 / Target）+ 每个已识别 SPM 芯片的卡位号，任一为空就拦下，不生成文件
       const params = validateConfigGenParams();
       if (!params.ok) {
         showConfigGenParamError(params.missing);
@@ -8539,7 +8543,8 @@ function bindEvents() {
       clearConfigGenParamError();
       const project = configGenFieldValue('configGenProject');
       const platform = configGenFieldValue('configGenPlatform');
-      const dab = configGenFieldValue('configGenDab');
+      // DAB 固定 spmv4（全小写），不接受用户输入
+      const dab = CONFIG_GEN_DAB_FIXED;
       // 从动态输入框收集 { SPM1: 'J5800', SPM2: 'J5801' } 形式的卡位号映射
       const serials = {};
       configGenSerialInputs().forEach((input) => {
@@ -8757,7 +8762,7 @@ function bindEvents() {
         project: configGenFieldValue('configGenProject'),
         serials: serials,
         platform: configGenFieldValue('configGenPlatform'),
-        dab: configGenFieldValue('configGenDab'),
+        dab: CONFIG_GEN_DAB_FIXED,
       };
     }
 
@@ -8771,13 +8776,16 @@ function bindEvents() {
     }
 
     function restoreConfigGenOptions() {
+      // DAB 固定 spmv4：任何情况下都强制写回，忽略旧缓存里可能存在的其他写法
+      const dabInput = document.getElementById('configGenDab');
+      if (dabInput) dabInput.value = CONFIG_GEN_DAB_FIXED;
       let saved = null;
       try {
         const raw = localStorage.getItem(CONFIG_GEN_OPTIONS_KEY);
         if (raw) saved = JSON.parse(raw);
       } catch (error) { saved = null; }
       if (!saved) return;
-      [['configGenProject', saved.project], ['configGenPlatform', saved.platform], ['configGenDab', saved.dab]]
+      [['configGenProject', saved.project], ['configGenPlatform', saved.platform]]
         .forEach((pair) => {
           const el = document.getElementById(pair[0]);
           if (el && pair[1]) el.value = pair[1];

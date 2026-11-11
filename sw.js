@@ -1,15 +1,18 @@
-const CACHE_VERSION = 'power-analysis-pwa-v33';
+// 全部使用相对路径：本地根部署与 GitHub Pages 子路径（/power-analysis/）都能正确缓存
+const CACHE_VERSION = 'power-analysis-pwa-v36';
 const APP_SHELL = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/style.css?v=2026100124',
-  '/config.js?v=2026100124',
-  '/supabase-auth.js?v=2026100124',
-  '/app.js?v=2026100124',
+  './',
+  './index.html',
+  './manifest.json',
+  './style.css?v=20261111g',
+  './endurance.css?v=20261111g',
+  './config.js?v=2026100124',
+  './supabase-auth.js?v=2026100124',
+  './app.js?v=20261111g',
+  './endurance.js?v=20261111g',
   './template.xlsx',
-  '/icon-192.svg',
-  '/icon-512.svg'
+  './icon-192.svg',
+  './icon-512.svg'
 ];
 
 self.addEventListener('install', (event) => {
@@ -41,10 +44,10 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then((response) => {
           const copy = response.clone();
-          caches.open(CACHE_VERSION).then((cache) => cache.put('/index.html', copy));
+          caches.open(CACHE_VERSION).then((cache) => cache.put('./index.html', copy));
           return response;
         })
-        .catch(() => caches.match('/index.html'))
+        .catch(() => caches.match('./index.html'))
     );
     return;
   }

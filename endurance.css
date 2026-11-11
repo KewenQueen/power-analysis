@@ -1,0 +1,378 @@
+/* ================================================================
+ * 续航 / 功耗现状模块样式（endurance.css）
+ * ================================================================ */
+#enduranceStatusRoot { display: block; }
+
+.es-project-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  flex-wrap: wrap;
+  padding: .8rem 1rem;
+  margin-bottom: 1rem;
+}
+.es-project-chips { display: flex; gap: .45rem; flex-wrap: wrap; }
+.es-project-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .4rem .8rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+  font-size: .74rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .18s ease;
+}
+.es-project-chip .material-symbols-outlined { font-size: 1rem; }
+.es-project-chip:hover { border-color: #a5b4fc; color: #4338ca; }
+.es-project-chip.is-active {
+  background: linear-gradient(135deg, #6366f1, #818cf8);
+  border-color: #6366f1;
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(99, 102, 241, .28);
+}
+.es-project-actions { display: flex; gap: .45rem; flex-wrap: wrap; }
+
+.es-empty {
+  padding: 3rem 1.5rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .6rem;
+}
+.es-empty-icon {
+  font-size: 2.6rem;
+  padding: .8rem;
+  border-radius: 50%;
+  background: #eef2ff;
+  color: #6366f1;
+}
+.es-empty h3 { margin: .2rem 0 0; font-size: 1.05rem; color: #1e293b; }
+.es-empty p { margin: 0 0 .6rem; color: #64748b; font-size: .78rem; max-width: 460px; line-height: 1.7; }
+
+.es-board { display: flex; flex-direction: column; gap: 1rem; }
+.es-card { padding: 1rem 1.1rem 1.15rem; }
+.es-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-bottom: .8rem;
+}
+.es-card-head h3 {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  margin: 0;
+  font-size: .88rem;
+  font-weight: 800;
+  color: #1e293b;
+}
+.es-card-head h3 .material-symbols-outlined { font-size: 1.15rem; color: #6366f1; }
+.es-card-head small { color: #94a3b8; font-size: .66rem; font-weight: 600; }
+.es-head-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+
+/* ---------- 电池参数 ---------- */
+.es-battery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: .6rem;
+}
+.es-battery-field { display: flex; flex-direction: column; gap: .25rem; }
+.es-battery-field span {
+  color: #64748b;
+  font-size: .66rem;
+  font-weight: 800;
+}
+.es-battery-field input {
+  border: 1px solid #dbe3ef;
+  border-radius: .55rem;
+  padding: .45rem .6rem;
+  font-size: .74rem;
+  font-weight: 600;
+  color: #0f172a;
+  outline: none;
+  background: #fff;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.es-battery-field input:focus {
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(129, 140, 248, .14);
+}
+.es-battery-derate {
+  margin: .7rem 0 0;
+  padding: .45rem .65rem;
+  border-radius: .55rem;
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: .68rem;
+  font-weight: 700;
+}
+.es-battery-derate b { font-size: .78rem; }
+
+/* ---------- 通用表格 ---------- */
+.es-table-wrap, .es-model-table-wrap {
+  overflow: auto;
+  border: 1px solid #eef2f7;
+  border-radius: .7rem;
+  scrollbar-width: thin;
+}
+.es-table, .es-model-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .72rem;
+}
+.es-table th, .es-model-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f1f5f9;
+  color: #475569;
+  font-weight: 800;
+  padding: .5rem .6rem;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid #e2e8f0;
+}
+.es-table td, .es-model-table td {
+  padding: .45rem .6rem;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+  white-space: nowrap;
+}
+.es-table tbody tr:hover, .es-model-table tbody tr:hover { background: #f8faff; }
+.es-table-empty {
+  text-align: center;
+  color: #94a3b8;
+  padding: 1.4rem .8rem !important;
+  font-size: .72rem;
+}
+.es-sc-name { font-weight: 700; color: #1e293b; }
+.es-sc-name small {
+  display: block;
+  color: #94a3b8;
+  font-size: .62rem;
+  font-weight: 600;
+  margin-top: .1rem;
+}
+.es-sc-current { font-weight: 800; color: #4338ca; }
+.es-sc-meta { color: #64748b; font-size: .68rem; }
+.es-sc-ops { text-align: right; }
+.es-col-ops { text-align: right; }
+
+.es-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  border-radius: .5rem;
+  padding: .28rem .55rem;
+  font-size: .66rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.es-mini-btn .material-symbols-outlined { font-size: .85rem; }
+.es-mini-btn:hover { border-color: #a5b4fc; color: #4338ca; background: #eef2ff; }
+.es-mini-btn.is-on { background: #6366f1; border-color: #6366f1; color: #fff; }
+.es-mini-danger:hover { border-color: #fda4af; color: #be123c; background: #fff1f2; }
+
+/* ---------- 续航模型 ---------- */
+.es-model-tabs { display: flex; gap: .45rem; flex-wrap: wrap; margin-bottom: .7rem; }
+.es-model-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .38rem .8rem;
+  border: 1px solid #e2e8f0;
+  border-radius: .6rem;
+  background: #fff;
+  color: #475569;
+  font-size: .72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.es-model-tab .material-symbols-outlined { font-size: .95rem; }
+.es-model-tab:hover { border-color: #a5b4fc; color: #4338ca; }
+.es-model-tab.is-active {
+  background: #eef2ff;
+  border-color: #818cf8;
+  color: #4338ca;
+  box-shadow: inset 0 -2px 0 #6366f1;
+}
+.es-model-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .6rem;
+  padding: 1.6rem 1rem;
+  color: #64748b;
+  font-size: .76rem;
+  text-align: center;
+}
+.es-model-toolbar { display: flex; gap: .45rem; flex-wrap: wrap; margin-bottom: .65rem; }
+
+.es-model-table .es-mode-head {
+  text-align: center;
+  background: #eef2ff;
+  color: #3730a3;
+  border-bottom: 1px solid #c7d2fe;
+}
+.es-mode-title { display: flex; align-items: center; justify-content: center; gap: .3rem; font-size: .72rem; }
+.es-mode-title small { display: block; color: #6366f1; font-weight: 600; }
+.es-mode-head small { color: #6366f1; font-weight: 600; font-size: .62rem; }
+.es-mode-tag {
+  font-style: normal;
+  background: #fef3c7;
+  color: #b45309;
+  border-radius: 999px;
+  padding: .05rem .4rem;
+  font-size: .58rem;
+  font-weight: 800;
+}
+.es-model-table .es-sub { background: #f8faff; font-size: .62rem; text-align: center; color: #64748b; }
+.es-corner { min-width: 120px; }
+.es-duration-cell { text-align: center; padding: .25rem .35rem !important; }
+.es-duration-input {
+  width: 74px;
+  border: 1px solid #e2e8f0;
+  border-radius: .45rem;
+  padding: .32rem .4rem;
+  font-size: .7rem;
+  font-weight: 700;
+  text-align: center;
+  color: #1e293b;
+  outline: none;
+  background: #fff;
+}
+.es-duration-input:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129, 140, 248, .14); }
+.es-duration-input.is-invalid,
+.es-battery-field input.is-invalid {
+  border-color: #ef4444;
+  background: #fef2f2;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, .12);
+}
+.es-mode-ops { display: inline-flex; gap: .1rem; margin-left: .15rem; }
+.es-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border: none;
+  border-radius: .3rem;
+  background: transparent;
+  color: #818cf8;
+  cursor: pointer;
+  padding: 0;
+}
+.es-icon-btn .material-symbols-outlined { font-size: .85rem; }
+.es-icon-btn:hover { background: #e0e7ff; }
+.es-icon-btn.es-icon-danger { color: #f87171; }
+.es-icon-btn.es-icon-danger:hover { background: #fee2e2; }
+.es-mode-note { color: #94a3b8 !important; font-weight: 500 !important; max-width: 130px; line-height: 1.4; }
+.es-mah-cell { text-align: center; color: #475569; font-weight: 700; background: #fcfcff; }
+.es-current-cell { text-align: center; color: #4338ca; font-weight: 800; }
+.es-stat-row td {
+  background: #f8fafc;
+  font-weight: 800;
+  color: #334155;
+  font-size: .7rem;
+}
+.es-stat-row td:first-child { color: #475569; }
+.es-stat-duration, .es-stat-mah { text-align: center; }
+.es-model-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: .35rem;
+  margin: .65rem 0 0;
+  color: #94a3b8;
+  font-size: .64rem;
+  line-height: 1.6;
+}
+.es-model-tip .material-symbols-outlined { font-size: .9rem; color: #a5b4fc; flex: none; }
+
+/* ---------- 横向对比 ---------- */
+.es-pick-group { margin-bottom: .7rem; }
+.es-pick-label {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  color: #475569;
+  font-size: .68rem;
+  font-weight: 800;
+  margin-bottom: .4rem;
+}
+.es-pick-chips { display: flex; gap: .4rem; flex-wrap: wrap; }
+.es-pick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  border-radius: 999px;
+  padding: .3rem .7rem;
+  font-size: .68rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.es-pick-chip .material-symbols-outlined { font-size: .92rem; color: #94a3b8; }
+.es-pick-chip:hover { border-color: #a5b4fc; }
+.es-pick-chip.is-on { background: #eef2ff; border-color: #818cf8; color: #4338ca; }
+.es-pick-chip.is-on .material-symbols-outlined { color: #6366f1; }
+.es-pick-chip-sm { padding: .22rem .55rem; font-size: .64rem; }
+.es-pick-empty { color: #94a3b8; font-size: .68rem; }
+.es-link-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #6366f1;
+  font-size: .64rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.es-link-btn:hover { text-decoration: underline; }
+.es-dou-toggle { display: flex; gap: .35rem; }
+
+.es-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: .9rem;
+  margin-top: .4rem;
+}
+.es-chart-box {
+  border: 1px solid #eef2f7;
+  border-radius: .75rem;
+  padding: .7rem .8rem .5rem;
+  background: #fff;
+}
+.es-chart-box h4 {
+  margin: 0 0 .5rem;
+  font-size: .74rem;
+  font-weight: 800;
+  color: #334155;
+}
+.es-canvas-wrap { position: relative; height: 280px; }
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 820px) {
+  .es-project-bar { flex-direction: column; align-items: stretch; }
+  .es-project-actions { justify-content: flex-start; }
+  .es-canvas-wrap { height: 240px; }
+}
+@media (max-width: 640px) {
+  .es-card { padding: .8rem .7rem .9rem; }
+  .es-battery-grid { grid-template-columns: 1fr; }
+  .es-chart-grid { grid-template-columns: 1fr; }
+  .es-canvas-wrap { height: 220px; }
+}
