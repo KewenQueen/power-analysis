@@ -6877,13 +6877,10 @@ function bindEvents() {
     }
 
     // ================================================================
-    // 采样通道梳理 —— 云文档导入（Supabase Edge Function 代理飞书取数）
+    // 采样通道梳理 —— 云文档导入
     // ================================================================
-    // The browser never sees the Feishu app secret: the Edge Function exchanges
-    // FEISHU_APP_ID / FEISHU_APP_SECRET for a tenant token server-side and returns a
-    // plain string matrix, which reuses the exact same parsing path as local files.
-    const CLOUD_IMPORT_TIMEOUT_MS = 30000;
-    const cloudImportState = { token: '', sheetId: '', sheets: [], busy: false };
+    // 云文档在线取数已下线，统一引导用户下载后走本地文档导入；该提示两个区块共用。
+    const CLOUD_DOC_UNSUPPORTED_MESSAGE = '暂不支持云文档链接，请下载到本地后用本地文档的形式上传';
 
     function setCloudImportStatus(text, tone, hint) {
       const statusEl = document.getElementById('samplingChannelCloudStatus');
@@ -6894,187 +6891,11 @@ function bindEvents() {
       else statusEl.removeAttribute('title');
     }
 
-    function setCloudImportBusy(busy) {
-      const button = document.getElementById('samplingChannelCloudImportBtn');
-      if (!button) return;
-      button.disabled = !!busy;
-      button.classList.toggle('is-busy', !!busy);
-      const label = button.querySelector('.sc-cloud-import-label');
-      if (label) label.textContent = busy ? '读取中…' : '导入';
-    }
-
-    function getCloudProxyEndpoint() {
-      const cfg = window.POWER_ANALYSIS_CONFIG || {};
-      if (cfg.feishuSheetProxyEndpoint) return String(cfg.feishuSheetProxyEndpoint).trim();
-      if (cfg.supabaseUrl) return String(cfg.supabaseUrl).replace(/\/+$/, '') + '/functions/v1/feishu-sheet-proxy';
-      return '';
-    }
-
-    // Accepts a full Feishu/Lark sheet URL or a bare spreadsheet token.
-    // Returns { token, sheetId } or { error } describing why it could not parse.
-    function parseCloudDocLink(rawValue) {
-      const raw = String(rawValue == null ? '' : rawValue).trim();
-      if (!raw) return { error: 'EMPTY' };
-      if (/^[A-Za-z0-9]{16,}$/.test(raw)) return { token: raw, sheetId: '' };
-      let url;
-      try {
-        url = new URL(/^https?:\/\//i.test(raw) ? raw : 'https://' + raw);
-      } catch {
-        return { error: 'INVALID' };
-      }
-      const path = url.pathname || '';
-      if (/\/wiki\//.test(path)) return { error: 'WIKI' };
-      const match = path.match(/\/(?:sheets|spreadsheets|base)\/([A-Za-z0-9]{10,})/);
-      if (!match) return { error: 'INVALID' };
-      const sheetId = url.searchParams.get('sheet') || url.searchParams.get('sheetId') || '';
-      return { token: match[1], sheetId };
-    }
-
-    async function callFeishuSheetProxy(payload) {
-      const endpoint = getCloudProxyEndpoint();
-      if (!endpoint) throw Object.assign(new Error('未配置云文档代理地址'), { code: 'PROXY_NOT_CONFIGURED' });
-      const cfg = window.POWER_ANALYSIS_CONFIG || {};
-      const headers = { 'content-type': 'application/json' };
-      if (cfg.feishuSheetProxyToken) headers['x-proxy-token'] = String(cfg.feishuSheetProxyToken);
-      const controller = typeof AbortController === 'function' ? new AbortController() : null;
-      const timer = controller ? setTimeout(() => controller.abort(), CLOUD_IMPORT_TIMEOUT_MS) : null;
-      let response;
-      try {
-        response = await fetch(endpoint, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(payload),
-          signal: controller ? controller.signal : undefined,
-        });
-      } catch (error) {
-        const isAbort = error && error.name === 'AbortError';
-        throw Object.assign(
-          new Error(isAbort ? '云文档服务响应超时，请稍后重试' : '无法连接云文档服务（网络异常或请求被拦截）'),
-          { code: 'NETWORK' }
-        );
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
-      const text = await response.text().catch(() => '');
-      let data = null;
-      if (text) {
-        try { data = JSON.parse(text); } catch { data = null; }
-      }
-      if (!response.ok || !data || data.ok !== true) {
-        const message = (data && (data.message || data.error)) || ('云文档服务返回 HTTP ' + response.status);
-        throw Object.assign(new Error(message), {
-          code: (data && data.code) || ('HTTP_' + response.status),
-          hint: (data && data.hint) || '',
-          status: response.status,
-        });
-      }
-      return data;
-    }
-
-    function describeCloudImportError(error) {
-      const code = error && error.code;
-      switch (code) {
-        case 'EMPTY':
-          return '请先粘贴飞书电子表格链接';
-        case 'WIKI':
-          return '知识库链接无法直接取数，请在飞书中「在电子表格中打开」后复制 /sheets/ 链接';
-        case 'INVALID':
-        case 'INVALID_URL':
-          return '链接格式无法识别，请粘贴电子表格链接（…/sheets/xxxx）';
-        case 'PROXY_NOT_CONFIGURED':
-          return '云文档服务尚未配置飞书应用凭证，请改用本地文档导入';
-        case 'PROXY_TOKEN_INVALID':
-          return '云文档服务校验失败（代理访问口令不匹配）';
-        case 'FEISHU_CREDENTIAL_INVALID':
-          return '飞书应用凭证无效，请检查 FEISHU_APP_ID / FEISHU_APP_SECRET';
-        case 'FEISHU_FORBIDDEN':
-          return '飞书应用无权访问该文档，请把应用的机器人加为文档协作者后重试';
-        case 'FEISHU_NOT_FOUND':
-          return '未找到该文档或工作表，请确认链接与所选工作表';
-        case 'NOT_FOUND':
-        case 'HTTP_404':
-          return '云文档服务暂不可用，请在飞书导出 Excel 后用本地文档导入';
-        case 'EMPTY_SHEET':
-          return '该工作表中没有可读取的数据';
-        case 'NO_HEADER':
-          return '未识别到采样通道表头，可切换下方工作表重试';
-        case 'NO_ROWS':
-          return '识别到表头但未解析到有效通道数据';
-        default:
-          return (error && error.message) ? error.message : '云文档导入失败';
-      }
-    }
-
-    function renderCloudSheetPicker(sheets, selectedSheetId) {
-      const wrap = document.getElementById('samplingChannelCloudSheetPicker');
-      const select = document.getElementById('samplingChannelCloudSheetSelect');
-      if (!wrap || !select) return;
-      const visible = (Array.isArray(sheets) ? sheets : []).filter((sheet) => sheet && !sheet.hidden && sheet.sheetId);
-      if (visible.length <= 1) {
-        wrap.classList.add('hidden');
-        select.innerHTML = '';
-        return;
-      }
-      select.innerHTML = visible.map((sheet) => (
-        '<option value="' + escapeHtml(sheet.sheetId) + '">' + escapeHtml(sheet.title || sheet.sheetId) + '</option>'
-      )).join('');
-      const target = visible.find((sheet) => sheet.sheetId === selectedSheetId);
-      select.value = (target || visible[0]).sheetId;
-      wrap.classList.remove('hidden');
-    }
-
-    async function importSamplingChannelCloudDoc(options) {
-      const opts = options || {};
-      if (cloudImportState.busy) return;
-      const direct = opts.spreadsheetToken
-        ? { token: opts.spreadsheetToken, sheetId: opts.sheetId || '' }
-        : parseCloudDocLink(document.getElementById('samplingChannelCloudUrl')?.value || '');
-      if (direct.error || !direct.token) {
-        setCloudImportStatus(describeCloudImportError({ code: direct.error || 'EMPTY' }), 'error');
-        const input = document.getElementById('samplingChannelCloudUrl');
-        if (input && (direct.error === 'EMPTY' || !direct.error)) input.focus();
-        return;
-      }
-      // Re-importing the same link honours the sheet picked in the dropdown.
-      const sheetPicker = document.getElementById('samplingChannelCloudSheetPicker');
-      const sheetSelect = document.getElementById('samplingChannelCloudSheetSelect');
-      const pickedSheetId = (!opts.spreadsheetToken && sheetPicker && !sheetPicker.classList.contains('hidden')
-        && cloudImportState.token === direct.token && sheetSelect && sheetSelect.value) ? sheetSelect.value : '';
-      const targetSheetId = pickedSheetId || direct.sheetId || '';
-
-      cloudImportState.busy = true;
-      setCloudImportBusy(true);
-      setCloudImportStatus('正在读取云文档…', 'loading');
-      try {
-        const payload = { action: 'read', spreadsheetToken: direct.token };
-        if (targetSheetId) payload.sheetId = targetSheetId;
-        const data = await callFeishuSheetProxy(payload);
-        const values = Array.isArray(data.values) ? data.values : [];
-        const sheetMeta = data.sheet || {};
-        cloudImportState.token = direct.token;
-        cloudImportState.sheetId = sheetMeta.sheetId || direct.sheetId || '';
-        cloudImportState.sheets = Array.isArray(data.sheets) ? data.sheets : [];
-        renderCloudSheetPicker(cloudImportState.sheets, cloudImportState.sheetId);
-
-        if (!values.length) throw Object.assign(new Error('empty'), { code: 'EMPTY_SHEET' });
-        const header = detectChannelHeaderRow(values);
-        if (!header) throw Object.assign(new Error('no header'), { code: 'NO_HEADER' });
-        const parsedRows = buildChannelRowsFromMatrix(values, header.rowIndex, header.map);
-        if (!parsedRows.length) throw Object.assign(new Error('no rows'), { code: 'NO_ROWS' });
-
-        const sheetTitle = sheetMeta.title || '云文档';
-        const mode = applyParsedChannelRows(parsedRows, { sourceLabel: sheetTitle });
-        setCloudImportStatus(
-          '已从「' + sheetTitle + '」导入 ' + parsedRows.length + ' 条通道' + (mode === 'append' ? '（追加）' : ''),
-          'success'
-        );
-      } catch (error) {
-        console.error(error);
-        setCloudImportStatus('导入失败：' + describeCloudImportError(error), 'error', error && error.hint);
-      } finally {
-        cloudImportState.busy = false;
-        setCloudImportBusy(false);
-      }
+    // 云文档在线取数已下线：点「导入」/回车统一提示改用本地文档，不再请求代理
+    function importSamplingChannelCloudDoc() {
+      setCloudImportStatus(CLOUD_DOC_UNSUPPORTED_MESSAGE, 'error');
+      const input = document.getElementById('samplingChannelCloudUrl');
+      if (input && !input.value.trim()) input.focus();
     }
 
 
@@ -7089,6 +6910,8 @@ function bindEvents() {
       { key: 'unlabeled', label: '未标注', tone: 'muted' },
     ];
     const SC_PREVIEW_MAX_ROWS = 500;
+    // 通道列表预览的优先级筛选：'' 表示全部，否则为 SC_PRIORITY_GROUPS 的 key
+    let scPreviewFilter = '';
 
     function samplingChannelPriorityGroup(value) {
       const text = String(value == null ? '' : value).trim();
@@ -7128,20 +6951,41 @@ function bindEvents() {
 
       const counts = { must: 0, merge: 0, optional: 0, skip: 0, unlabeled: 0 };
       rows.forEach((row) => { counts[samplingChannelPriorityGroup(row.priority)] += 1; });
+      // 仅当筛选 key 非法时回到「全部」；计数为 0 的分类允许选中并展示空结果
+      const validFilters = ['', 'must', 'merge', 'optional', 'skip', 'unlabeled'];
+      if (validFilters.indexOf(scPreviewFilter) === -1) scPreviewFilter = '';
 
-      statsEl.innerHTML = '<span class="sc-stat sc-stat-total">通道总数 <b>' + rows.length + '</b></span>'
+      const statChip = (filter, tone, label, count, title) => {
+        const active = scPreviewFilter === filter;
+        return '<button type="button" class="sc-stat sc-stat-' + tone + (active ? ' is-active' : '') + '"'
+          + ' data-sc-filter="' + filter + '" aria-pressed="' + (active ? 'true' : 'false') + '" title="' + title + '">'
+          + label + ' <b>' + count + '</b></button>';
+      };
+      statsEl.innerHTML = statChip('', 'total', '通道总数', rows.length, '显示全部通道')
         + SC_PRIORITY_GROUPS.filter((group) => group.key !== 'unlabeled' || counts.unlabeled > 0)
-          .map((group) => '<span class="sc-stat sc-stat-' + group.tone + '">' + group.label + ' <b>' + counts[group.key] + '</b></span>')
+          .map((group) => statChip(group.key, group.tone, group.label, counts[group.key], '点击只看「' + group.label + '」通道，再点一次或点「通道总数」恢复'))
           .join('');
 
       head.innerHTML = '<tr><th class="sc-preview-idx">#</th>'
         + cols.map((col) => '<th>' + escapeHtml(col.label) + '</th>').join('')
         + '</tr>';
 
-      const limit = Math.min(rows.length, SC_PREVIEW_MAX_ROWS);
+      // 筛选后的行（保留原始行号，方便与全量表对照）
+      const listed = rows
+        .map((row, index) => ({ row: row || {}, idx: index + 1 }))
+        .filter((item) => !scPreviewFilter || samplingChannelPriorityGroup(item.row.priority) === scPreviewFilter);
+
+      if (!listed.length) {
+        body.innerHTML = '<tr><td class="sc-preview-idx">—</td><td colspan="' + cols.length
+          + '" class="sc-preview-more">没有匹配当前筛选条件的通道</td></tr>';
+        return;
+      }
+
+      const limit = Math.min(listed.length, SC_PREVIEW_MAX_ROWS);
       const html = [];
       for (let i = 0; i < limit; i += 1) {
-        const row = rows[i] || {};
+        const item = listed[i];
+        const row = item.row;
         const cells = cols.map((col) => {
           const value = row[col.key] == null ? '' : String(row[col.key]);
           if (!value) return '<td class="sc-preview-empty">—</td>';
@@ -7151,12 +6995,12 @@ function bindEvents() {
           }
           return '<td title="' + escapeHtml(value) + '">' + escapeHtml(value) + '</td>';
         }).join('');
-        html.push('<tr><td class="sc-preview-idx">' + (i + 1) + '</td>' + cells + '</tr>');
+        html.push('<tr><td class="sc-preview-idx">' + item.idx + '</td>' + cells + '</tr>');
       }
       body.innerHTML = html.join('');
-      if (rows.length > limit) {
+      if (listed.length > limit) {
         body.innerHTML += '<tr><td class="sc-preview-idx">…</td><td colspan="' + cols.length
-          + '" class="sc-preview-more">仅展示前 ' + limit + ' 行，完整数据共 ' + rows.length + ' 行（生成的模板包含全部数据）</td></tr>';
+          + '" class="sc-preview-more">仅展示前 ' + limit + ' 行，当前筛选共 ' + listed.length + ' 行（生成的模板包含全部数据）</td></tr>';
       }
     }
 
@@ -8237,8 +8081,6 @@ function bindEvents() {
     const CONFIG_GEN_OPTIONS_KEY = 'qepm_config_gen_options_v1';
     const CONFIG_GEN_ANALOG_CHANNELS = 48;
     const CONFIG_GEN_PACKAGE_DESC = 'QEPM target configuration file package';
-    // 云文档链接暂不支持在线取数，统一用这句提示引导走本地文档上传
-    const CONFIG_GEN_CLOUD_UNSUPPORTED = '暂不支持云文档链接，请下载到本地后用本地文档的形式上传';
     // 模块两位编码 -> 参考配置里的 category（00_VBAT -> 00_VBATT 等）
     const CONFIG_GEN_CATEGORY_BY_CODE = {
       '00': '00_VBATT',
@@ -8264,7 +8106,7 @@ function bindEvents() {
       { id: 'configGenDab', label: 'DAB' },
     ];
     // 用 var 声明：bindEvents 里更早的初始化会在本段赋值前调用可用态刷新，需要拿到 undefined 而不是抛 TDZ
-    var configGenState = { rows: [], rowsUrl: '', source: '', busy: false, files: [], packageJson: '', meta: null };
+    var configGenState = { busy: false, files: [], packageJson: '', meta: null };
 
     function configGenFieldValue(id) {
       const el = document.getElementById(id);
@@ -8594,38 +8436,16 @@ function bindEvents() {
       };
     }
 
-    function setConfigGenSourceStatus(text, tone, hint) {
-      const statusEl = document.getElementById('configGenSourceStatus');
-      if (!statusEl) return;
-      statusEl.textContent = text || '';
-      statusEl.dataset.tone = tone || '';
-      if (hint) statusEl.title = hint;
-      else statusEl.removeAttribute('title');
-    }
-
     function describeConfigGenError(error) {
       const code = error && error.code;
-      if (code === 'CLOUD_UNSUPPORTED') return CONFIG_GEN_CLOUD_UNSUPPORTED;
       if (code === 'NO_CHANNEL') return '未解析到任何 SPM 通道，请确认「采样通道QC」列填的是 SPM1_CH07 形式';
-      return describeCloudImportError(error);
-    }
-
-    function handleConfigGenRead() {
-      const url = configGenFieldValue('configGenUrl');
-      if (!url) {
-        setConfigGenSourceStatus('请先粘贴采样通道云文档链接', 'error');
-        const input = document.getElementById('configGenUrl');
-        if (input) input.focus();
-        return;
-      }
-      // 云文档链接暂不支持在线取数：不发请求，直接提示走本地文档上传
-      setConfigGenSourceStatus(CONFIG_GEN_CLOUD_UNSUPPORTED, 'error');
+      return (error && error.message) ? error.message : '配置文件生成失败';
     }
 
     async function handleConfigGenGenerate() {
       const button = document.getElementById('configGenBtn');
       if (!button || configGenState.busy) return;
-      // 四项参数必填：任一为空就拦下，不读文档、不生成文件
+      // 四项参数必填：任一为空就拦下，不生成文件
       const params = validateConfigGenParams();
       if (!params.ok) {
         showConfigGenParamError(params.missing);
@@ -8633,7 +8453,6 @@ function bindEvents() {
         return;
       }
       clearConfigGenParamError();
-      const url = configGenFieldValue('configGenUrl');
       const project = configGenFieldValue('configGenProject');
       const serial = configGenFieldValue('configGenSerial');
       const platform = configGenFieldValue('configGenPlatform');
@@ -8645,12 +8464,10 @@ function bindEvents() {
       button.disabled = true;
       button.classList.remove('is-ready');
       try {
-        // 云文档链接暂不支持在线取数：只认上方本地文档导入 / 在线录入的通道数据
-        let rows = (state.samplingChannelOnlineRows || []).slice();
-        if (url) setConfigGenSourceStatus(CONFIG_GEN_CLOUD_UNSUPPORTED, 'error');
+        // 数据源与上方「采样通道梳理」共用：本地文档导入 / 在线录入的通道数据
+        const rows = (state.samplingChannelOnlineRows || []).slice();
         if (!rows.length) {
-          if (url) throw Object.assign(new Error(CONFIG_GEN_CLOUD_UNSUPPORTED), { code: 'CLOUD_UNSUPPORTED' });
-          throw Object.assign(new Error('没有可用的采样通道数据，请先在上方导入本地文档或在线录入'), { code: 'NO_ROWS' });
+          throw Object.assign(new Error('没有可用的采样通道数据，请先在上方「采样通道梳理」导入本地文档或在线录入'), { code: 'NO_ROWS' });
         }
 
         const plan = buildConfigGenPlan(rows, { defaultChip: 'SPM1' });
@@ -8859,12 +8676,10 @@ function bindEvents() {
       const button = document.getElementById('configGenBtn');
       if (!button) return;
       // 页面上更早的初始化会先调到这里，此时 configGenState 还可能没赋值（见上方 var 声明说明）
-      const cfg = configGenState || { rows: [], files: [], busy: false, source: '' };
-      const url = configGenFieldValue('configGenUrl');
-      const cached = cfg.rows.length;
+      const cfg = configGenState || { files: [], busy: false };
       const online = state.samplingChannelOnlineRows.length;
-      // 云文档链接不再作为可生成依据：只有本地导入 / 在线录入的真实通道数据才行
-      const ready = cached > 0 || online > 0;
+      // 只认上方「采样通道梳理」本地导入 / 在线录入的真实通道数据
+      const ready = online > 0;
       const label = document.getElementById('configGenBtnLabel');
       const hint = document.getElementById('configGenHint');
       const badge = document.getElementById('configGenBadge');
@@ -8872,19 +8687,12 @@ function bindEvents() {
       button.disabled = !ready || cfg.busy;
       button.classList.toggle('is-ready', ready && !cfg.busy);
       if (label) {
-        const count = cached || online;
-        label.textContent = count ? '生成配置文件（' + count + ' 条记录）' : '生成配置文件';
+        label.textContent = online ? '生成配置文件（' + online + ' 条记录）' : '生成配置文件';
       }
       if (hint) {
         hint.classList.toggle('is-ready', ready);
-        if (url) {
-          // 粘了云文档链接：统一引导改用本地文档
-          hint.innerHTML = '<span class="material-symbols-outlined">error</span>' + escapeHtml(CONFIG_GEN_CLOUD_UNSUPPORTED);
-        } else if (!ready) {
-          hint.innerHTML = '<span class="material-symbols-outlined">error</span>请在上方导入本地文档或在线录入通道数据';
-        } else if (cached) {
-          hint.innerHTML = '<span class="material-symbols-outlined">check_circle</span>已读取「' + escapeHtml(cfg.source || '本地文档')
-            + '」，生成后按 SPM 芯片拆分输出 .conf';
+        if (!ready) {
+          hint.innerHTML = '<span class="material-symbols-outlined">error</span>请先在上方「采样通道梳理」导入本地文档或在线录入通道数据';
         } else {
           hint.innerHTML = '<span class="material-symbols-outlined">check_circle</span>将使用上方「采样通道梳理」已录入的 ' + online + ' 条记录生成';
         }
@@ -8896,25 +8704,10 @@ function bindEvents() {
     }
 
     (function initConfigGenPanel() {
-      const urlInput = document.getElementById('configGenUrl');
-      const readBtn = document.getElementById('configGenReadBtn');
       const genBtn = document.getElementById('configGenBtn');
       const allBtn = document.getElementById('configGenDownloadAll');
       const resultBox = document.getElementById('configGenResult');
       restoreConfigGenOptions();
-      if (urlInput) {
-        urlInput.addEventListener('input', () => {
-          // 云文档读取已不支持：链接清空时把「不支持」提示一并撤掉
-          if (!urlInput.value.trim()) setConfigGenSourceStatus('', '');
-          updateConfigGenAvailability();
-        });
-        urlInput.addEventListener('keydown', (event) => {
-          if (event.key !== 'Enter') return;
-          event.preventDefault();
-          handleConfigGenRead();
-        });
-      }
-      if (readBtn) readBtn.addEventListener('click', handleConfigGenRead);
       if (genBtn) genBtn.addEventListener('click', handleConfigGenGenerate);
       if (allBtn) allBtn.addEventListener('click', downloadAllConfigGenFiles);
       if (resultBox) resultBox.addEventListener('click', handleConfigGenResultClick);
@@ -8946,12 +8739,10 @@ function bindEvents() {
       });
     }
 
-    // Cloud document import wiring (Feishu sheet -> Edge Function proxy).
+    // Cloud document import wiring：入口保留，在线取数已下线，点击只给统一提示。
     (function initCloudImport() {
       const urlInput = document.getElementById('samplingChannelCloudUrl');
       const importBtn = document.getElementById('samplingChannelCloudImportBtn');
-      const sheetPicker = document.getElementById('samplingChannelCloudSheetPicker');
-      const sheetSelect = document.getElementById('samplingChannelCloudSheetSelect');
       if (importBtn) importBtn.addEventListener('click', () => importSamplingChannelCloudDoc());
       if (urlInput) {
         urlInput.addEventListener('keydown', (event) => {
@@ -8959,16 +8750,25 @@ function bindEvents() {
           event.preventDefault();
           importSamplingChannelCloudDoc();
         });
-        // A new link invalidates the sheet list read from the previous document.
         urlInput.addEventListener('input', () => {
-          if (cloudImportState.busy) return;
-          if (sheetPicker) sheetPicker.classList.add('hidden');
-          if (sheetSelect) sheetSelect.innerHTML = '';
-          cloudImportState.token = '';
-          cloudImportState.sheetId = '';
           setCloudImportStatus('', '');
         });
       }
+    })();
+
+    // 通道列表预览：点优先级统计标签筛选，点「通道总数」恢复全部
+    (function initChannelPreviewFilter() {
+      const statsEl = document.getElementById('samplingChannelPreviewStats');
+      if (!statsEl) return;
+      statsEl.addEventListener('click', (event) => {
+        const chip = event.target && event.target.closest ? event.target.closest('[data-sc-filter]') : null;
+        if (!chip) return;
+        const key = chip.getAttribute('data-sc-filter') || '';
+        scPreviewFilter = (!key || scPreviewFilter === key) ? '' : key;
+        renderChannelPreview();
+        const tableWrap = document.querySelector('#samplingChannelPreview .sc-preview-table-wrap');
+        if (tableWrap) tableWrap.scrollTop = 0;
+      });
     })();
 
     // Load saved draft

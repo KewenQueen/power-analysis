@@ -2383,43 +2383,21 @@ body.col-resizing {
 .config-gen-badge.is-ready { background: #e0e7ff; color: #3730a3; border-color: #c7d2fe; border-style: solid; }
 .config-gen-badge.is-done { background: #dcfce7; color: #15803d; border-color: #bbf7d0; border-style: solid; }
 
-/* 数据源 */
-.config-gen-source {
-  display: flex;
-  align-items: flex-end;
-  gap: .5rem;
-  flex-wrap: wrap;
-  margin-top: .75rem;
-  padding: .7rem .8rem;
-  border: 1px solid #e2e8f0;
-  border-radius: .8rem;
-  background: rgba(255, 255, 255, .9);
-}
-.config-gen-source-field { flex: 1 1 320px; min-width: 0; }
-.config-gen-source-field label {
+/* 数据源说明：与上方「采样通道梳理」共用，不再保留独立云文档入口 */
+.config-gen-source-note {
   display: flex;
   align-items: center;
-  gap: .3rem;
-  margin-bottom: .3rem;
-  color: #475569;
-  font-size: .67rem;
-  font-weight: 800;
+  gap: .35rem;
+  margin: .75rem 0 0;
+  padding: .5rem .7rem;
+  border: 1px dashed #c7d2fe;
+  border-radius: .7rem;
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: .66rem;
+  font-weight: 700;
 }
-.config-gen-source-field label .material-symbols-outlined { font-size: .95rem; color: #6366f1; }
-.config-gen-source-field input {
-  width: 100%;
-  border: 1px solid #cbd5e1;
-  border-radius: .6rem;
-  padding: .5rem .6rem;
-  background: #fff;
-  color: #0f172a;
-  font-size: .7rem;
-  outline: none;
-}
-.config-gen-source-field input:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129, 140, 248, .14); }
-.config-gen-source > button { flex: 0 0 auto; min-height: 34px; display: inline-flex; align-items: center; gap: .3rem; }
-.config-gen-source > button.is-busy { opacity: .7; cursor: progress; }
-.config-gen-source > .sc-import-status { flex: 1 1 100%; }
+.config-gen-source-note .material-symbols-outlined { font-size: .95rem; color: #6366f1; }
 
 /* 参数 */
 .config-gen-params {
@@ -2633,8 +2611,6 @@ body.col-resizing {
   .config-file-list { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
-  .config-gen-source { align-items: stretch; }
-  .config-gen-source > button { width: 100%; justify-content: center; }
   .config-gen-params { grid-template-columns: 1fr; }
   .config-gen-go { width: 100%; }
 }
@@ -3224,11 +3200,27 @@ body.is-admin .dpdb-admin-action { display: inline-flex !important; }
   align-items: center;
   gap: .2rem;
   padding: .18rem .5rem;
+  border: 1px solid transparent;
   border-radius: 999px;
+  font-family: inherit;
   font-size: .62rem;
   font-weight: 700;
+  line-height: 1.4;
   background: #f1f5f9;
   color: #475569;
+  cursor: pointer;
+  transition: filter .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+.sc-stat:hover { filter: brightness(.96); box-shadow: 0 1px 4px rgba(15, 23, 42, .12); }
+.sc-stat:active { transform: scale(.97); }
+.sc-stat:focus-visible {
+  outline: 2px solid #0ea5e9;
+  outline-offset: 2px;
+}
+.sc-stat.is-active {
+  border-color: currentColor;
+  box-shadow: 0 0 0 1px currentColor inset, 0 2px 8px rgba(15, 23, 42, .18);
+  filter: none;
 }
 .sc-stat b { font-size: .7rem; font-weight: 800; }
 .sc-stat-total { background: #e0f2fe; color: #0369a1; }

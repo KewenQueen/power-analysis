@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=20261111b" />
+    <link rel="stylesheet" href="./style.css?v=20261111c" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -387,7 +387,7 @@
             <span class="feature-entry-icon"><span class="material-symbols-outlined">table_edit</span></span>
             <span class="template-builder-summary-copy">
               <strong>新建项目拆解模板</strong>
-              <small>梳理采样通道资料，支持云文档、本地文档与在线填写</small>
+              <small>梳理采样通道资料，支持本地文档导入与在线填写</small>
             </span>
             <span class="material-symbols-outlined template-builder-chevron">expand_more</span>
           </summary>
@@ -406,14 +406,10 @@
                 <span class="sampling-channel-icon"><span class="material-symbols-outlined">cloud</span></span>
                 <div>
                   <strong>云文档导入</strong>
-                  <small>粘贴飞书电子表格链接，在线取数并自动识别表头</small>
+                  <small>暂不支持云文档链接，请下载到本地后用本地文档的形式上传</small>
                 </div>
                 <small id="samplingChannelCloudStatus" class="sc-import-status"></small>
                 <input id="samplingChannelCloudUrl" type="url" placeholder="https://xxx.larkoffice.com/sheets/..." aria-label="采样通道云文档链接" />
-                <div id="samplingChannelCloudSheetPicker" class="sc-sheet-picker hidden">
-                  <label for="samplingChannelCloudSheetSelect">读取工作表</label>
-                  <select id="samplingChannelCloudSheetSelect"></select>
-                </div>
                 <button id="samplingChannelCloudImportBtn" type="button" class="template-btn sc-cloud-import-btn"><span class="material-symbols-outlined">cloud_download</span><span class="sc-cloud-import-label">导入</span></button>
               </article>
               <article class="sampling-channel-card">
@@ -440,7 +436,7 @@
                   <span class="material-symbols-outlined">list_alt</span>
                   <strong>通道列表预览</strong>
                 </div>
-                <div id="samplingChannelPreviewStats" class="sc-preview-stats"></div>
+                <div id="samplingChannelPreviewStats" class="sc-preview-stats" role="group" aria-label="按优先级筛选通道"></div>
               </div>
               <div class="sc-preview-table-wrap">
                 <table class="sc-preview-table">
@@ -450,7 +446,7 @@
               </div>
               <p class="sc-preview-tip">
                 <span class="material-symbols-outlined">info</span>
-                预览数据与上方在线填写表格同源，编辑后自动同步；表格可左右滚动查看全部字段。
+                预览数据与上方在线填写表格同源，编辑后自动同步；点击右上角统计标签可按类型筛选，再次点击该标签或点「通道总数」恢复全部；表格可左右滚动查看全部字段。
               </p>
             </div>
 
@@ -597,21 +593,11 @@
               <span class="sampling-channel-badge config-gen-badge" id="configGenBadge">待生成</span>
             </div>
 
-            <!-- 数据源：飞书电子表格链接 -->
-            <div class="config-gen-source">
-              <div class="config-gen-source-field">
-                <label for="configGenUrl">
-                  <span class="material-symbols-outlined">link</span>
-                  采样通道云文档链接
-                </label>
-                <input id="configGenUrl" type="url" placeholder="https://xxx.larkoffice.com/sheets/..." autocomplete="off" />
-              </div>
-              <button id="configGenReadBtn" type="button" class="template-btn template-btn-secondary">
-                <span class="material-symbols-outlined text-sm">cloud_download</span>
-                <span class="config-gen-read-label">读取通道</span>
-              </button>
-              <small id="configGenSourceStatus" class="sc-import-status"></small>
-            </div>
+            <!-- 数据源与上方「采样通道梳理」共用：本地文档导入 / 在线填写 -->
+            <p class="config-gen-source-note">
+              <span class="material-symbols-outlined">link</span>
+              通道数据与上方「采样通道梳理」共用，请在该区块导入本地文档或在线录入通道
+            </p>
 
             <!-- 生成参数（四项必填） -->
             <div class="config-gen-params">
@@ -667,7 +653,7 @@
             </div>
             <p id="configGenHint" class="config-gen-hint">
               <span class="material-symbols-outlined">error</span>
-              请在上方导入本地文档或在线录入通道数据
+              请先在上方「采样通道梳理」导入本地文档或在线录入通道数据
             </p>
 
             <div id="configGenResult" class="config-gen-result hidden"></div>
@@ -1247,7 +1233,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="./config.js?v=2026100124"></script>
     <script src="./supabase-auth.js?v=2026100124"></script>
-    <script src="./app.js?v=20261111b"></script>
+    <script src="./app.js?v=20261111c"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
