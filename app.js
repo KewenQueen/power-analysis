@@ -8237,6 +8237,8 @@ function bindEvents() {
     const CONFIG_GEN_OPTIONS_KEY = 'qepm_config_gen_options_v1';
     const CONFIG_GEN_ANALOG_CHANNELS = 48;
     const CONFIG_GEN_PACKAGE_DESC = 'QEPM target configuration file package';
+    // 云文档链接暂不支持在线取数，统一用这句提示引导走本地文档上传
+    const CONFIG_GEN_CLOUD_UNSUPPORTED = '暂不支持云文档链接，请下载到本地后用本地文档的形式上传';
     // 模块两位编码 -> 参考配置里的 category（00_VBAT -> 00_VBATT 等）
     const CONFIG_GEN_CATEGORY_BY_CODE = {
       '00': '00_VBATT',
@@ -8603,55 +8605,12 @@ function bindEvents() {
 
     function describeConfigGenError(error) {
       const code = error && error.code;
+      if (code === 'CLOUD_UNSUPPORTED') return CONFIG_GEN_CLOUD_UNSUPPORTED;
       if (code === 'NO_CHANNEL') return '未解析到任何 SPM 通道，请确认「采样通道QC」列填的是 SPM1_CH07 形式';
       return describeCloudImportError(error);
     }
 
-    // 读取云文档：先在默认/指定工作表找表头，找不到再依次试其它可见工作表
-    function readConfigGenSheet(rawUrl) {
-      const direct = parseCloudDocLink(rawUrl);
-      if (!direct || direct.error) {
-        const code = (direct && direct.error) || 'EMPTY';
-        return Promise.reject(Object.assign(new Error(describeCloudImportError({ code: code })), { code: code }));
-      }
-      const token = direct.token;
-      const tryParse = (values) => {
-        const matrix = Array.isArray(values) ? values : [];
-        const header = detectChannelHeaderRow(matrix);
-        if (!header) return null;
-        const rows = buildChannelRowsFromMatrix(matrix, header.rowIndex, header.map);
-        return rows.length ? rows : null;
-      };
-      const request = (sheetId) => callFeishuSheetProxy({ action: 'read', spreadsheetToken: token, sheetId: sheetId || '' });
-
-      return request(direct.sheetId).then((first) => {
-        const meta = first.sheet || {};
-        const rows = tryParse(first.values);
-        if (rows) {
-          return { rows: rows, sheetTitle: meta.title || '云文档', sheetId: meta.sheetId || '', sheets: first.sheets || [] };
-        }
-        const tried = {};
-        tried[meta.sheetId || ''] = true;
-        const others = (Array.isArray(first.sheets) ? first.sheets : [])
-          .filter((sheet) => sheet && !sheet.hidden && sheet.sheetId && !tried[sheet.sheetId])
-          .slice(0, 3);
-        const chain = others.reduce((promise, sheet) => promise.then((found) => {
-          if (found) return found;
-          return request(sheet.sheetId).then((res) => {
-            const parsed = tryParse(res.values);
-            if (!parsed) return null;
-            const resMeta = res.sheet || sheet;
-            return { rows: parsed, sheetTitle: resMeta.title || sheet.title || '云文档', sheetId: resMeta.sheetId || sheet.sheetId, sheets: first.sheets || [] };
-          });
-        }), Promise.resolve(null));
-        return chain.then((found) => {
-          if (found) return found;
-          throw Object.assign(new Error('未识别到采样通道表头'), { code: 'NO_HEADER' });
-        });
-      });
-    }
-
-    async function handleConfigGenRead() {
+    function handleConfigGenRead() {
       const url = configGenFieldValue('configGenUrl');
       if (!url) {
         setConfigGenSourceStatus('请先粘贴采样通道云文档链接', 'error');
@@ -8659,33 +8618,8 @@ function bindEvents() {
         if (input) input.focus();
         return;
       }
-      if (configGenState.busy) return;
-      const readBtn = document.getElementById('configGenReadBtn');
-      configGenState.busy = true;
-      if (readBtn) {
-        readBtn.disabled = true;
-        readBtn.classList.add('is-busy');
-      }
-      setConfigGenSourceStatus('正在读取云文档…', 'loading');
-      try {
-        const res = await readConfigGenSheet(url);
-        configGenState.rows = res.rows;
-        configGenState.rowsUrl = url;
-        configGenState.source = res.sheetTitle;
-        setConfigGenSourceStatus('已读取「' + res.sheetTitle + '」的 ' + res.rows.length + ' 条记录', 'success');
-      } catch (error) {
-        configGenState.rows = [];
-        configGenState.rowsUrl = '';
-        configGenState.source = '';
-        setConfigGenSourceStatus(describeConfigGenError(error), 'error');
-      } finally {
-        configGenState.busy = false;
-        if (readBtn) {
-          readBtn.disabled = false;
-          readBtn.classList.remove('is-busy');
-        }
-        updateConfigGenAvailability();
-      }
+      // 云文档链接暂不支持在线取数：不发请求，直接提示走本地文档上传
+      setConfigGenSourceStatus(CONFIG_GEN_CLOUD_UNSUPPORTED, 'error');
     }
 
     async function handleConfigGenGenerate() {
@@ -8711,33 +8645,13 @@ function bindEvents() {
       button.disabled = true;
       button.classList.remove('is-ready');
       try {
-        let rows = configGenState.rows;
-        // 填了链接就以云文档为准（链接没变且已读过则复用缓存，避免重复取数）
-        if (url && (url !== configGenState.rowsUrl || !rows.length)) {
-          try {
-            const res = await readConfigGenSheet(url);
-            rows = res.rows;
-            configGenState.rows = rows;
-            configGenState.rowsUrl = url;
-            configGenState.source = res.sheetTitle;
-            setConfigGenSourceStatus('已读取「' + res.sheetTitle + '」的 ' + rows.length + ' 条记录', 'success');
-          } catch (error) {
-            // 网络抖动时不至于白跑一遍：优先复用已缓存的同源数据，否则再退回已录入的通道
-            if (!rows.length && url === configGenState.rowsUrl) rows = configGenState.rows.slice();
-            let fallbackNote = '';
-            if (!rows.length) {
-              const fallback = (state.samplingChannelOnlineRows || []).slice();
-              if (fallback.length) {
-                rows = fallback;
-                fallbackNote = '云文档读取失败，已改用上方录入的 ' + rows.length + ' 条通道数据生成';
-              }
-            }
-            if (!rows.length) throw error;
-            setConfigGenSourceStatus(fallbackNote || '云文档读取失败，已改用缓存的通道数据生成', 'error', describeConfigGenError(error));
-          }
+        // 云文档链接暂不支持在线取数：只认上方本地文档导入 / 在线录入的通道数据
+        let rows = (state.samplingChannelOnlineRows || []).slice();
+        if (url) setConfigGenSourceStatus(CONFIG_GEN_CLOUD_UNSUPPORTED, 'error');
+        if (!rows.length) {
+          if (url) throw Object.assign(new Error(CONFIG_GEN_CLOUD_UNSUPPORTED), { code: 'CLOUD_UNSUPPORTED' });
+          throw Object.assign(new Error('没有可用的采样通道数据，请先在上方导入本地文档或在线录入'), { code: 'NO_ROWS' });
         }
-        if (!rows.length) rows = state.samplingChannelOnlineRows.slice();
-        if (!rows.length) throw Object.assign(new Error('没有可用的采样通道数据'), { code: 'NO_ROWS' });
 
         const plan = buildConfigGenPlan(rows, { defaultChip: 'SPM1' });
         if (!plan.chips.length) throw Object.assign(new Error('未解析到 SPM 通道'), { code: 'NO_CHANNEL' });
@@ -8949,7 +8863,8 @@ function bindEvents() {
       const url = configGenFieldValue('configGenUrl');
       const cached = cfg.rows.length;
       const online = state.samplingChannelOnlineRows.length;
-      const ready = Boolean(url) || cached > 0 || online > 0;
+      // 云文档链接不再作为可生成依据：只有本地导入 / 在线录入的真实通道数据才行
+      const ready = cached > 0 || online > 0;
       const label = document.getElementById('configGenBtnLabel');
       const hint = document.getElementById('configGenHint');
       const badge = document.getElementById('configGenBadge');
@@ -8962,13 +8877,14 @@ function bindEvents() {
       }
       if (hint) {
         hint.classList.toggle('is-ready', ready);
-        if (!ready) {
-          hint.innerHTML = '<span class="material-symbols-outlined">error</span>请先粘贴采样通道云文档链接，或在上方录入通道数据';
+        if (url) {
+          // 粘了云文档链接：统一引导改用本地文档
+          hint.innerHTML = '<span class="material-symbols-outlined">error</span>' + escapeHtml(CONFIG_GEN_CLOUD_UNSUPPORTED);
+        } else if (!ready) {
+          hint.innerHTML = '<span class="material-symbols-outlined">error</span>请在上方导入本地文档或在线录入通道数据';
         } else if (cached) {
-          hint.innerHTML = '<span class="material-symbols-outlined">check_circle</span>已读取「' + escapeHtml(cfg.source || '云文档')
+          hint.innerHTML = '<span class="material-symbols-outlined">check_circle</span>已读取「' + escapeHtml(cfg.source || '本地文档')
             + '」，生成后按 SPM 芯片拆分输出 .conf';
-        } else if (url) {
-          hint.innerHTML = '<span class="material-symbols-outlined">check_circle</span>生成时会实时读取该链接的采样通道数据';
         } else {
           hint.innerHTML = '<span class="material-symbols-outlined">check_circle</span>将使用上方「采样通道梳理」已录入的 ' + online + ' 条记录生成';
         }
@@ -8988,13 +8904,8 @@ function bindEvents() {
       restoreConfigGenOptions();
       if (urlInput) {
         urlInput.addEventListener('input', () => {
-          // 链接变了：之前读到的缓存不再代表当前来源
-          if (urlInput.value.trim() !== configGenState.rowsUrl) {
-            configGenState.rows = [];
-            configGenState.rowsUrl = '';
-            configGenState.source = '';
-            setConfigGenSourceStatus('', '');
-          }
+          // 云文档读取已不支持：链接清空时把「不支持」提示一并撤掉
+          if (!urlInput.value.trim()) setConfigGenSourceStatus('', '');
           updateConfigGenAvailability();
         });
         urlInput.addEventListener('keydown', (event) => {
