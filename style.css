@@ -2402,10 +2402,50 @@ body.col-resizing {
 /* 参数 */
 .config-gen-params {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: .5rem;
   margin-top: .55rem;
 }
+/* 采集卡位号映射：按识别到的 SPM 芯片动态展开 */
+.config-gen-serial-group {
+  margin-top: .55rem;
+  padding: .6rem .7rem .7rem;
+  border: 1px solid #e2e8f0;
+  border-radius: .75rem;
+  background: rgba(248, 250, 252, .85);
+}
+.config-gen-serial-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .05rem .5rem;
+  margin-bottom: .45rem;
+}
+.config-gen-serial-title {
+  color: #475569;
+  font-size: .62rem;
+  font-weight: 800;
+}
+.config-gen-serial-head small {
+  color: #94a3b8;
+  font-size: .6rem;
+  font-weight: 600;
+}
+.config-gen-serial-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: .5rem;
+}
+.config-gen-serial-empty {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  margin: 0;
+  color: #94a3b8;
+  font-size: .64rem;
+  font-weight: 600;
+}
+.config-gen-serial-empty .material-symbols-outlined { font-size: .95rem; color: #a5b4fc; }
 .config-gen-field { display: block; min-width: 0; }
 .config-gen-field > span { display: block; margin-bottom: .25rem; color: #64748b; font-size: .62rem; font-weight: 800; }
 .config-gen-field input {
@@ -2612,6 +2652,7 @@ body.col-resizing {
 }
 @media (max-width: 640px) {
   .config-gen-params { grid-template-columns: 1fr; }
+  .config-gen-serial-fields { grid-template-columns: 1fr; }
   .config-gen-go { width: 100%; }
 }
 

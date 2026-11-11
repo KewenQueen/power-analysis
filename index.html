@@ -22,7 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="./style.css?v=20261111c" />
+    <link rel="stylesheet" href="./style.css?v=20261111d" />
   </head>
   <body>
     <div class="page-bg"></div>
@@ -599,15 +599,11 @@
               通道数据与上方「采样通道梳理」共用，请在该区块导入本地文档或在线录入通道
             </p>
 
-            <!-- 生成参数（四项必填） -->
+            <!-- 生成参数（项目 / 平台 / DAB 必填；卡位号在下方按识别到的 SPM 芯片分别填写） -->
             <div class="config-gen-params">
               <label class="config-gen-field" for="configGenProject">
                 <span>项目名称 <i class="config-gen-required">*</i></span>
                 <input id="configGenProject" type="text" placeholder="示例：DoraG" autocomplete="off" required aria-required="true" />
-              </label>
-              <label class="config-gen-field" for="configGenSerial">
-                <span>采集卡位号 <i class="config-gen-required">*</i></span>
-                <input id="configGenSerial" type="text" placeholder="示例：J3501" autocomplete="off" required aria-required="true" />
               </label>
               <label class="config-gen-field" for="configGenPlatform">
                 <span>平台 / Target <i class="config-gen-required">*</i></span>
@@ -617,6 +613,19 @@
                 <span>DAB <i class="config-gen-required">*</i></span>
                 <input id="configGenDab" type="text" placeholder="示例：spmv4" autocomplete="off" required aria-required="true" />
               </label>
+            </div>
+
+            <!-- 采集卡位号映射：按通道数据里识别到的 SPM 芯片动态生成输入框，一一对应 -->
+            <div class="config-gen-serial-group">
+              <div class="config-gen-serial-head">
+                <span class="config-gen-serial-title">采集卡位号映射 <i class="config-gen-required">*</i></span>
+                <small>按识别到的 SPM 芯片分别填写对应卡位号，生成文件名与之一一对应</small>
+              </div>
+              <div id="configGenSerialFields" class="config-gen-serial-fields hidden"></div>
+              <p id="configGenSerialEmpty" class="config-gen-serial-empty">
+                <span class="material-symbols-outlined">info</span>
+                导入通道数据后，将按识别到的 SPM 芯片（SPM1 / SPM2 / …）显示对应的卡位号输入框
+              </p>
             </div>
             <p id="configGenParamError" class="config-gen-param-error hidden" role="alert"></p>
 
@@ -632,6 +641,7 @@
                   <li>只读取「<strong>采样通道QC</strong>」列的 <code>SPM1_CH07</code> / <code>SPM2_CH42</code> 形式；「采样通道NI」列<strong>不参与</strong>生成。</li>
                   <li>通道槽位：<code>channel = 32 × (nn % 4) + 2 × ⌊nn / 4⌋</code>，电流通道占 <code>channel</code>，电压通道占 <code>channel + 1</code>。</li>
                   <li>命名：<code>{SPM}_CH{nn}_{采样通道 NET-}</code>，电流通道追加 <code>_I</code>、电压通道追加 <code>_V</code>；电流通道的 <code>coupling</code> 指向同组电压通道。</li>
+                  <li>文件名：<code>{项目名称}_{SPM}_{卡位号}.conf</code>，每个 SPM 芯片使用「采集卡位号映射」里为它单独填写的卡位号，不再自动递增。</li>
                   <li>电阻：电流通道取「采样电阻」列，电压通道固定 <code>1000</code>；类别按「模块」两位编码映射到 <code>00_VBATT ~ 10_OTHERS</code>。</li>
                   <li>未占用的 <code>CH00 ~ CH47</code> 自动补 <code>disabled: 1</code> 占位（<code>category: NULL</code>），保证 48 组通道齐全。</li>
                   <li>固定追加测试通道 <code>SPM_SENSE48 ~ SPM_SENSE63</code> 与 3 个 marker（<code>124 ~ 130</code> 槽位），共 131 条记录 / 芯片。</li>
@@ -1233,7 +1243,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="./config.js?v=2026100124"></script>
     <script src="./supabase-auth.js?v=2026100124"></script>
-    <script src="./app.js?v=20261111c"></script>
+    <script src="./app.js?v=20261111d"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

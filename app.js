@@ -8098,22 +8098,33 @@ function bindEvents() {
     // 每个 bank 的首个测试通道带预期电流描述与 200Ω 采样电阻；其余测试通道 1000Ω
     const CONFIG_GEN_TEST_CURRENTS = ['1.001', '10.116', '4.953', '0.502'];
     const CONFIG_GEN_MARKERS = ['PSOC_SPM_MARKER1', 'PSOC_SPM_MARKER2', 'PSOC_APQ_MSM_XO_EN'];
-    // 生成前必填的四项参数：缺任何一项都拦下，不产出文件
+    // 生成前必填的静态三项；采集卡位号是按识别到的 SPM 芯片动态渲染的，单独校验
     const CONFIG_GEN_REQUIRED_FIELDS = [
       { id: 'configGenProject', label: '项目名称' },
-      { id: 'configGenSerial', label: '采集卡位号' },
       { id: 'configGenPlatform', label: '平台 / Target' },
       { id: 'configGenDab', label: 'DAB' },
     ];
     // 用 var 声明：bindEvents 里更早的初始化会在本段赋值前调用可用态刷新，需要拿到 undefined 而不是抛 TDZ
     var configGenState = { busy: false, files: [], packageJson: '', meta: null };
+    // 卡位号映射的当前值 { SPM1: 'J5800', SPM2: 'J5801' }，与动态输入框双向同步
+    var configGenSerials = {};
+    // 当前已渲染卡位号输入框的芯片列表（顺序即生成顺序）
+    var configGenRenderedChips = [];
+    // 旧版本单个「采集卡位号（起始）」缓存，用于首次渲染时按芯片顺序自动递增迁移
+    var configGenLegacySerial = '';
 
     function configGenFieldValue(id) {
       const el = document.getElementById(id);
       return el ? String(el.value == null ? '' : el.value).trim() : '';
     }
 
-    // 四项生成参数校验：空项标红 + 汇总提示，返回第一个待填写输入框用于聚焦
+    // 读取当前动态渲染的卡位号输入框
+    function configGenSerialInputs() {
+      const root = document.getElementById('configGenSerialFields');
+      return root ? Array.from(root.querySelectorAll('.config-gen-serial-input')) : [];
+    }
+
+    // 生成参数校验：静态三项 + 每个已识别 SPM 芯片的卡位号；空项标红 + 汇总提示，返回第一个待填写输入框用于聚焦
     function validateConfigGenParams() {
       const missing = [];
       let firstInput = null;
@@ -8125,6 +8136,16 @@ function bindEvents() {
         if (wrap) wrap.classList.toggle('is-invalid', empty);
         if (empty) {
           missing.push(field.label);
+          if (!firstInput) firstInput = input;
+        }
+      });
+      configGenSerialInputs().forEach((input) => {
+        const chip = input.dataset.chip || 'SPM';
+        const empty = !String(input.value == null ? '' : input.value).trim();
+        const wrap = input.closest ? input.closest('.config-gen-field') : null;
+        if (wrap) wrap.classList.toggle('is-invalid', empty);
+        if (empty) {
+          missing.push(chip + ' 卡位号');
           if (!firstInput) firstInput = input;
         }
       });
@@ -8147,6 +8168,10 @@ function bindEvents() {
       CONFIG_GEN_REQUIRED_FIELDS.forEach((field) => {
         const input = document.getElementById(field.id);
         const wrap = input && input.closest ? input.closest('.config-gen-field') : null;
+        if (wrap) wrap.classList.remove('is-invalid');
+      });
+      configGenSerialInputs().forEach((input) => {
+        const wrap = input.closest ? input.closest('.config-gen-field') : null;
         if (wrap) wrap.classList.remove('is-invalid');
       });
     }
@@ -8372,6 +8397,7 @@ function bindEvents() {
       return { chips: chips, skipped: skipped, assigned: assigned };
     }
 
+    // 旧版单输入框「起始位号」的递增规则，仅用于把旧缓存迁移成按芯片的卡位号映射
     function configGenSerialAt(base, offset) {
       const text = String(base == null ? '' : base).trim();
       if (!text) return '';
@@ -8380,6 +8406,63 @@ function bindEvents() {
       const prefix = match[1];
       const digits = match[2];
       return prefix + String(Number(digits) + offset).padStart(digits.length, '0');
+    }
+
+    // 从通道数据识别实际会生成文件的 SPM 芯片（与 buildConfigGenPlan 的收录条件保持一致）
+    function configGenDetectChips(rows) {
+      if (!Array.isArray(rows) || !rows.length) return [];
+      try {
+        const plan = buildConfigGenPlan(rows, { defaultChip: 'SPM1' });
+        return (plan.chips || []).map((chip) => chip.name);
+      } catch (error) {
+        return [];
+      }
+    }
+
+    // 取某个芯片当前应显示的卡位号：已填值优先，其次用旧版起始位号按顺序递增兜底
+    function configGenSerialValueFor(chip, index) {
+      if (configGenSerials && configGenSerials[chip]) return configGenSerials[chip];
+      if (configGenLegacySerial) return configGenSerialAt(configGenLegacySerial, index);
+      return '';
+    }
+
+    // 按识别到的芯片动态渲染卡位号输入框；芯片集合不变时只同步值，保留用户输入与焦点
+    function syncConfigGenSerialFields() {
+      const container = document.getElementById('configGenSerialFields');
+      const empty = document.getElementById('configGenSerialEmpty');
+      if (!container || !empty) return;
+      // 防御：页面早期初始化可能在 var 赋值前就调到本函数
+      configGenSerials = configGenSerials || {};
+      configGenRenderedChips = configGenRenderedChips || [];
+      const chips = configGenDetectChips(state.samplingChannelOnlineRows);
+      const same = chips.length === configGenRenderedChips.length
+        && chips.every((chip, index) => chip === configGenRenderedChips[index]);
+
+      if (!same) {
+        configGenRenderedChips = chips.slice();
+        if (!chips.length) {
+          container.innerHTML = '';
+        } else {
+          container.innerHTML = chips.map((chip, index) => {
+            const value = configGenSerialValueFor(chip, index);
+            if (value) configGenSerials[chip] = value;
+            return '<label class="config-gen-field" data-chip-field="' + escapeHtml(chip) + '">'
+              + '<span>' + escapeHtml(chip) + ' 卡位号 <i class="config-gen-required">*</i></span>'
+              + '<input type="text" class="config-gen-serial-input" data-chip="' + escapeHtml(chip) + '"'
+              + ' value="' + escapeHtml(value) + '" placeholder="示例：J5800" autocomplete="off" aria-required="true" />'
+              + '</label>';
+          }).join('');
+        }
+      } else {
+        chips.forEach((chip, index) => {
+          const input = container.querySelector('.config-gen-serial-input[data-chip="' + chip + '"]');
+          if (!input) return;
+          const expected = configGenSerialValueFor(chip, index);
+          if (String(input.value || '').trim() !== expected) input.value = expected;
+        });
+      }
+      container.classList.toggle('hidden', chips.length === 0);
+      empty.classList.toggle('hidden', chips.length > 0);
     }
 
     function configGenLabel(project, chip, serial) {
@@ -8403,8 +8486,9 @@ function bindEvents() {
 
     function buildConfigGenFiles(plan, options) {
       const opts = options || {};
-      return plan.chips.map((chip, index) => {
-        const label = configGenLabel(opts.project, chip.name, configGenSerialAt(opts.serial, index));
+      const serials = opts.serials || {};
+      return plan.chips.map((chip) => {
+        const label = configGenLabel(opts.project, chip.name, serials[chip.name] || '');
         const content = {
           label: label,
           target: opts.platform,
@@ -8445,7 +8529,7 @@ function bindEvents() {
     async function handleConfigGenGenerate() {
       const button = document.getElementById('configGenBtn');
       if (!button || configGenState.busy) return;
-      // 四项参数必填：任一为空就拦下，不生成文件
+      // 必填参数：静态三项 + 每个已识别 SPM 芯片的卡位号，任一为空就拦下，不生成文件
       const params = validateConfigGenParams();
       if (!params.ok) {
         showConfigGenParamError(params.missing);
@@ -8454,9 +8538,13 @@ function bindEvents() {
       }
       clearConfigGenParamError();
       const project = configGenFieldValue('configGenProject');
-      const serial = configGenFieldValue('configGenSerial');
       const platform = configGenFieldValue('configGenPlatform');
       const dab = configGenFieldValue('configGenDab');
+      // 从动态输入框收集 { SPM1: 'J5800', SPM2: 'J5801' } 形式的卡位号映射
+      const serials = {};
+      configGenSerialInputs().forEach((input) => {
+        serials[input.dataset.chip] = String(input.value == null ? '' : input.value).trim();
+      });
 
       configGenState.busy = true;
       const label = document.getElementById('configGenBtnLabel');
@@ -8473,7 +8561,7 @@ function bindEvents() {
         const plan = buildConfigGenPlan(rows, { defaultChip: 'SPM1' });
         if (!plan.chips.length) throw Object.assign(new Error('未解析到 SPM 通道'), { code: 'NO_CHANNEL' });
 
-        const files = buildConfigGenFiles(plan, { project: project, serial: serial, platform: platform, dab: dab });
+        const files = buildConfigGenFiles(plan, { project: project, serials: serials, platform: platform, dab: dab });
         const date = configGenDateStamp(new Date());
         files.forEach((file) => {
           file.json = configGenStringify({
@@ -8484,7 +8572,7 @@ function bindEvents() {
         });
         configGenState.files = files;
         configGenState.packageJson = configGenStringify(buildConfigGenPackage(files));
-        configGenState.meta = { project: project, serial: serial, platform: platform, dab: dab, date: date };
+        configGenState.meta = { project: project, serials: serials, platform: platform, dab: dab, date: date };
         renderConfigGenResult({ files: files, plan: plan });
 
         const badge = document.getElementById('configGenBadge');
@@ -8495,7 +8583,7 @@ function bindEvents() {
         }
         const allBtn = document.getElementById('configGenDownloadAll');
         if (allBtn) allBtn.classList.remove('hidden');
-        persistConfigGenOptions({ project: project, serial: serial, platform: platform, dab: dab });
+        persistConfigGenOptions(collectConfigGenOptions());
       } catch (error) {
         renderConfigGenError(describeConfigGenError(error));
       } finally {
@@ -8654,8 +8742,32 @@ function bindEvents() {
       downloadConfigGenText(json, safe + '_config_package.json');
     }
 
+    // 汇总当前生成参数，统一写入 localStorage（新结构：serials 按芯片存卡位号）
+    function collectConfigGenOptions() {
+      const serials = {};
+      configGenSerialInputs().forEach((input) => {
+        const chip = input.dataset.chip;
+        if (chip) serials[chip] = String(input.value == null ? '' : input.value).trim();
+      });
+      // 输入框尚未渲染（还没导入数据）时，保留内存里已恢复的映射，避免被一次实时保存清空
+      Object.keys(configGenSerials || {}).forEach((chip) => {
+        if (serials[chip] === undefined) serials[chip] = configGenSerials[chip];
+      });
+      return {
+        project: configGenFieldValue('configGenProject'),
+        serials: serials,
+        platform: configGenFieldValue('configGenPlatform'),
+        dab: configGenFieldValue('configGenDab'),
+      };
+    }
+
     function persistConfigGenOptions(options) {
-      try { localStorage.setItem(CONFIG_GEN_OPTIONS_KEY, JSON.stringify(options)); } catch (error) { /* ignore */ }
+      try {
+        localStorage.setItem(CONFIG_GEN_OPTIONS_KEY, JSON.stringify(options));
+        // 新结构（按芯片的卡位号映射）落盘后，旧版单起始位号的迁移即完成使命，
+        // 之后新出现的芯片不再自动递增，留空要求显式填写
+        if (options && options.serials) configGenLegacySerial = '';
+      } catch (error) { /* ignore */ }
     }
 
     function restoreConfigGenOptions() {
@@ -8665,16 +8777,28 @@ function bindEvents() {
         if (raw) saved = JSON.parse(raw);
       } catch (error) { saved = null; }
       if (!saved) return;
-      [['configGenProject', saved.project], ['configGenSerial', saved.serial], ['configGenPlatform', saved.platform], ['configGenDab', saved.dab]]
+      [['configGenProject', saved.project], ['configGenPlatform', saved.platform], ['configGenDab', saved.dab]]
         .forEach((pair) => {
           const el = document.getElementById(pair[0]);
           if (el && pair[1]) el.value = pair[1];
         });
+      // 新结构：按芯片保存的卡位号映射
+      if (saved.serials && typeof saved.serials === 'object') {
+        Object.keys(saved.serials).forEach((chip) => {
+          const value = String(saved.serials[chip] == null ? '' : saved.serials[chip]).trim();
+          if (value) configGenSerials[chip] = value;
+        });
+      } else if (saved.serial) {
+        // 旧结构：单个起始卡位号，渲染输入框时按芯片顺序自动递增迁移
+        configGenLegacySerial = String(saved.serial).trim();
+      }
     }
 
     function updateConfigGenAvailability() {
       const button = document.getElementById('configGenBtn');
       if (!button) return;
+      // 通道数据变化后，先同步按芯片动态渲染的卡位号输入框
+      if (typeof syncConfigGenSerialFields === 'function') syncConfigGenSerialFields();
       // 页面上更早的初始化会先调到这里，此时 configGenState 还可能没赋值（见上方 var 声明说明）
       const cfg = configGenState || { files: [], busy: false };
       const online = state.samplingChannelOnlineRows.length;
@@ -8707,11 +8831,12 @@ function bindEvents() {
       const genBtn = document.getElementById('configGenBtn');
       const allBtn = document.getElementById('configGenDownloadAll');
       const resultBox = document.getElementById('configGenResult');
+      const serialFields = document.getElementById('configGenSerialFields');
       restoreConfigGenOptions();
       if (genBtn) genBtn.addEventListener('click', handleConfigGenGenerate);
       if (allBtn) allBtn.addEventListener('click', downloadAllConfigGenFiles);
       if (resultBox) resultBox.addEventListener('click', handleConfigGenResultClick);
-      // 必填项一旦补上就撤掉红框；全部填完隐藏汇总提示
+      // 静态必填项一旦补上就撤掉红框；全部填完隐藏汇总提示，并实时保存
       CONFIG_GEN_REQUIRED_FIELDS.forEach((field) => {
         const input = document.getElementById(field.id);
         if (!input) return;
@@ -8720,14 +8845,24 @@ function bindEvents() {
           if (wrap && input.value.trim()) wrap.classList.remove('is-invalid');
           if (validateConfigGenParams().ok) clearConfigGenParamError();
           // 手填的值随时记住，刷新后还能复现
-          persistConfigGenOptions({
-            project: configGenFieldValue('configGenProject'),
-            serial: configGenFieldValue('configGenSerial'),
-            platform: configGenFieldValue('configGenPlatform'),
-            dab: configGenFieldValue('configGenDab'),
-          });
+          persistConfigGenOptions(collectConfigGenOptions());
         });
       });
+      // 卡位号输入框是动态渲染的，用事件委托统一处理输入 / 红框撤销 / 实时保存
+      if (serialFields) {
+        serialFields.addEventListener('input', (event) => {
+          const input = event.target && event.target.closest
+            ? event.target.closest('.config-gen-serial-input') : null;
+          if (!input) return;
+          const chip = input.dataset.chip;
+          if (chip) configGenSerials[chip] = String(input.value == null ? '' : input.value).trim();
+          const wrap = input.closest ? input.closest('.config-gen-field') : null;
+          if (wrap && input.value.trim()) wrap.classList.remove('is-invalid');
+          if (validateConfigGenParams().ok) clearConfigGenParamError();
+          persistConfigGenOptions(collectConfigGenOptions());
+        });
+      }
+      syncConfigGenSerialFields();
       updateConfigGenAvailability();
     })();
 
