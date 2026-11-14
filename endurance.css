@@ -376,3 +376,272 @@
   .es-chart-grid { grid-template-columns: 1fr; }
   .es-canvas-wrap { height: 220px; }
 }
+
+/* ---------- 电池可放电容量查询表 ---------- */
+.es-discharge-card .es-discharge-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: .35rem;
+  margin: .2rem 0 .65rem;
+  color: #94a3b8;
+  font-size: .66rem;
+  line-height: 1.6;
+}
+.es-discharge-card .es-discharge-tip b { color: #6366f1; font-weight: 800; }
+.es-discharge-table { min-width: 460px; }
+.es-discharge-table th { white-space: nowrap; }
+.es-dt-input {
+  width: 120px;
+  border: 1px solid #e2e8f0;
+  border-radius: .45rem;
+  padding: .3rem .45rem;
+  font-size: .7rem;
+  font-weight: 700;
+  text-align: center;
+  color: #1e293b;
+  outline: none;
+  background: #fff;
+}
+.es-dt-input:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129, 140, 248, .14); }
+.es-dt-input.is-invalid {
+  border-color: #ef4444;
+  background: #fef2f2;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, .12);
+}
+.es-dt-ratio { text-align: center; color: #4338ca; font-weight: 800; font-size: .72rem; }
+.es-discharge-sync {
+  display: flex;
+  align-items: flex-start;
+  gap: .4rem;
+  margin: .7rem 0 0;
+  padding: .55rem .7rem;
+  border-radius: .6rem;
+  background: #f8faff;
+  border: 1px solid #e0e7ff;
+  color: #475569;
+  font-size: .68rem;
+  line-height: 1.6;
+}
+.es-discharge-sync b { color: #4338ca; font-weight: 800; }
+.es-discharge-sync .material-symbols-outlined { font-size: .95rem; color: #818cf8; flex: none; margin-top: .05rem; }
+
+/* ================================================================
+ * v2 公式网格 / 场景电流新列 / 公式编辑器（2026-11 追加）
+ * ================================================================ */
+
+/* ---------- 场景电流：新列结构 ---------- */
+.es-scenario-table { min-width: 880px; }
+.es-sc-name { font-weight: 800; color: #1e293b; white-space: nowrap; }
+.es-sc-current { white-space: nowrap; position: relative; font-weight: 800; color: #4338ca; }
+.es-custom-chip {
+  font-style: normal;
+  background: #ede9fe;
+  color: #6d28d9;
+  border-radius: 999px;
+  padding: .05rem .4rem;
+  margin: 0 .25rem;
+  font-size: .58rem;
+  font-weight: 800;
+}
+.es-inline-edit, .es-inline-clear {
+  width: 1.05rem;
+  height: 1.05rem;
+  opacity: 0;
+  transition: opacity .15s ease;
+  vertical-align: middle;
+}
+.es-scenario-table tr:hover .es-inline-edit,
+.es-scenario-table tr:hover .es-inline-clear { opacity: 1; }
+.es-inline-clear { color: #f59e0b; }
+.es-sc-version, .es-sc-date { text-align: center; font-size: .68rem; color: #475569; white-space: nowrap; }
+.es-field-input {
+  width: 110px;
+  border: 1px solid #e2e8f0;
+  border-radius: .45rem;
+  padding: .28rem .4rem;
+  font-size: .68rem;
+  color: #1e293b;
+  outline: none;
+  background: #fff;
+}
+.es-field-input:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129, 140, 248, .14); }
+.es-standard-input { width: 120px; }
+.es-remark-input { width: 140px; }
+.es-custom-th { position: relative; white-space: nowrap; }
+.es-field-del {
+  display: inline-flex;
+  border: none;
+  background: transparent;
+  color: #f87171;
+  cursor: pointer;
+  padding: 0;
+  margin-left: .15rem;
+  vertical-align: middle;
+}
+.es-field-del .material-symbols-outlined { font-size: .85rem; }
+
+/* ---------- 模型 v2 网格 ---------- */
+.es-chart-wrap { position: relative; min-height: 300px; margin-top: .9rem; }
+.es-chart-wrap h4 { font-size: .78rem; font-weight: 800; color: #334155; margin: 0 0 .45rem; }
+.es-model-table-wrap { overflow-x: auto; border: 1px solid #eef2f7; border-radius: .75rem; }
+.es-mode-toolbar { display: flex; gap: .45rem; flex-wrap: wrap; margin-bottom: .65rem; }
+.es-model-table { min-width: 720px; border-collapse: separate; border-spacing: 0; }
+.es-model-table th, .es-model-table td { border-bottom: 1px solid #f1f5f9; }
+.es-col-addr { display: block; color: #a5b4fc !important; font-weight: 700 !important; font-size: .58rem !important; }
+.es-duration-wrap { position: relative; padding: .25rem .35rem !important; text-align: center; }
+.es-duration-wrap.is-formula { background: #faf5ff; }
+.es-duration-wrap.is-error .es-duration-input {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+.es-formula-result {
+  display: block;
+  margin-top: .15rem;
+  font-size: .6rem;
+  font-weight: 800;
+  color: #7c3aed;
+  line-height: 1.2;
+}
+.es-formula-result[hidden] { display: none; }
+.es-formula-result.is-error { color: #ef4444; }
+
+/* 公式单元格（耗电量 / Total / DOU） */
+.es-formula-cell {
+  position: relative;
+  text-align: center;
+  padding: .3rem .35rem !important;
+  white-space: nowrap;
+  background: #fcfcff;
+}
+.es-formula-cell.is-formula { background: #f5f3ff; }
+.es-formula-cell.is-error { background: #fef2f2; }
+.es-cell-text { font-size: .7rem; font-weight: 800; color: #334155; }
+.es-cell-text-error, .es-cell-error { color: #ef4444; font-size: .62rem; font-weight: 800; }
+.es-cell-empty { color: #cbd5e1; font-size: .7rem; }
+.es-fx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-left: .2rem;
+  border: 1px solid #c7d2fe;
+  border-radius: .3rem;
+  background: #eef2ff;
+  color: #4f46e5;
+  font-size: .58rem;
+  font-weight: 900;
+  cursor: pointer;
+  padding: 0;
+  vertical-align: middle;
+  opacity: .55;
+  transition: opacity .15s ease;
+}
+.es-formula-cell:hover .es-fx-btn { opacity: 1; }
+.es-fx-btn:hover { background: #c7d2fe; }
+.es-stat-row .es-stat-blank { background: #f8fafc; }
+.es-stat-auto .es-stat-mah { color: #4338ca; }
+
+/* ---------- 公式编辑器弹层 ---------- */
+.es-formula-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, .42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 1.2rem;
+}
+.es-formula-dialog {
+  width: min(620px, 100%);
+  max-height: 86vh;
+  overflow: auto;
+  background: #fff;
+  padding: 1.1rem 1.2rem 1.2rem;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .28);
+}
+.es-formula-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .6rem;
+  margin-bottom: .5rem;
+}
+.es-formula-head h4 {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  margin: 0;
+  font-size: .92rem;
+  font-weight: 800;
+  color: #1e293b;
+}
+.es-formula-head h4 .material-symbols-outlined { font-size: 1.15rem; color: #6366f1; }
+.es-formula-sub { margin: 0 0 .55rem; color: #94a3b8; font-size: .68rem; }
+.es-formula-input {
+  width: 100%;
+  border: 1px solid #c7d2fe;
+  border-radius: .6rem;
+  padding: .6rem .7rem;
+  font-size: .82rem;
+  font-weight: 700;
+  color: #1e293b;
+  outline: none;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.es-formula-input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, .15); }
+.es-formula-quick { display: flex; flex-wrap: wrap; gap: .35rem; margin: .6rem 0; }
+.es-quick-chip {
+  border: 1px solid #e2e8f0;
+  background: #f8faff;
+  color: #4338ca;
+  border-radius: 999px;
+  padding: .22rem .6rem;
+  font-size: .66rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.es-quick-chip:hover { border-color: #818cf8; background: #eef2ff; }
+.es-formula-trial {
+  margin: 0 0 .7rem;
+  padding: .5rem .7rem;
+  border-radius: .55rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: .72rem;
+  color: #64748b;
+}
+.es-formula-trial-value { font-weight: 900; color: #4338ca; }
+.es-formula-trial-value.is-error { color: #ef4444; }
+.es-formula-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+.es-formula-foot > div { display: flex; gap: .45rem; }
+
+/* 公式说明 */
+.es-formula-help { width: min(720px, 100%); }
+.es-help-body h5 {
+  margin: .8rem 0 .3rem;
+  font-size: .78rem;
+  font-weight: 800;
+  color: #4338ca;
+}
+.es-help-body h5:first-child { margin-top: 0; }
+.es-help-body p {
+  margin: 0;
+  color: #475569;
+  font-size: .7rem;
+  line-height: 1.75;
+}
+.es-help-body b { color: #1e293b; }
+
+@media (max-width: 640px) {
+  .es-field-input, .es-standard-input, .es-remark-input { width: 92px; }
+  .es-formula-foot { flex-direction: column; align-items: stretch; }
+}
