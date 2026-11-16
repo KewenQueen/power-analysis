@@ -2061,8 +2061,8 @@
       + '<label class="es-pick-chip"><input type="radio" name="es-dou-metric" value="typ"' + (compareState.douMetric === 'typ' ? ' checked' : '') + '><span>Typ</span></label>'
       + '<label class="es-pick-chip"><input type="radio" name="es-dou-metric" value="min"' + (compareState.douMetric === 'min' ? ' checked' : '') + '><span>Min</span></label></div>'
       + renderModelSummary(selectedProjects, defaultColumn)
-      + '<div class="es-chart-wrap"><h4>场景电流对比（mA）</h4><canvas id="esCurrentChart"></canvas></div>'
-      + '<div class="es-chart-wrap"><h4>可使用时长 DOU 对比（h，按各项目激活模型的同名对比列）</h4><canvas id="esDouChart"></canvas></div>'
+      + '<div class="es-chart-wrap"><h4>场景电流对比（mA）</h4><div class="es-chart-canvas-box"><canvas id="esCurrentChart"></canvas></div></div>'
+      + '<div class="es-chart-wrap"><h4>可使用时长 DOU 对比（h，按各项目激活模型的同名对比列）</h4><div class="es-chart-canvas-box"><canvas id="esDouChart"></canvas></div></div>'
       + '</section>';
   }
 
@@ -2133,7 +2133,8 @@
     drawDouChart();
   }
 
-  // 在同一 canvas 上重绘前，先销毁并摘除登记在册的旧 Chart 实例，避免 "Canvas is already in use" 与实例泄漏
+  // 在同一 canvas 上重绘前，先销毁并摘除登记在册的旧 Chart 实例，避免 "Canvas is already in use" 与实例泄漏。
+  // 同时清除可能已被响应式反馈循环撑爆的内联宽高（Chrome canvas 上限 2^25px），让新图在确定高度的父容器内重新测量。
   function reuseCanvas(canvas) {
     for (let i = E.chartInstances.length - 1; i >= 0; i -= 1) {
       const inst = E.chartInstances[i];
@@ -2142,6 +2143,13 @@
         E.chartInstances.splice(i, 1);
       }
     }
+    const box = canvas.parentElement;
+    const boxH = box ? box.clientHeight : 0;
+    // 父容器高度异常（0 或超过视口数倍）时不建图，等下一次 render 在正常布局下重建，杜绝暴涨
+    if (!box || boxH <= 0 || boxH > window.innerHeight * 4) return false;
+    canvas.style.width = '';
+    canvas.style.height = '';
+    return true;
   }
 
   function selectedProjects() {
@@ -2152,7 +2160,7 @@
   function drawCurrentChart() {
     const canvas = root.querySelector('#esCurrentChart');
     if (!canvas || typeof Chart === 'undefined') return;
-    reuseCanvas(canvas);
+    if (!reuseCanvas(canvas)) return;
     const projects = selectedProjects();
     const names = compareState.scenarioNames.slice();
     const datasets = projects.map((p, i) => ({
@@ -2167,7 +2175,7 @@
       type: 'bar',
       data: { labels: names, datasets: datasets },
       options: {
-        responsive: true, maintainAspectRatio: false,
+        responsive: true, maintainAspectRatio: false, resizeDelay: 120,
         plugins: { legend: { labels: { boxWidth: 12, font: { size: 11 } } } },
         scales: {
           x: { ticks: { autoSkip: false, maxRotation: 40, minRotation: 30, font: { size: 10 } } },
@@ -2180,7 +2188,7 @@
   function drawDouChart() {
     const canvas = root.querySelector('#esDouChart');
     if (!canvas || typeof Chart === 'undefined') return;
-    reuseCanvas(canvas);
+    if (!reuseCanvas(canvas)) return;
     const projects = selectedProjects();
     // 以各项目激活模型中出现过的对比列名为分组；同名对比列才可横向比较
     const columnNameSet = new Set();
@@ -2208,7 +2216,7 @@
       type: 'bar',
       data: { labels: columnNames, datasets: datasets },
       options: {
-        responsive: true, maintainAspectRatio: false,
+        responsive: true, maintainAspectRatio: false, resizeDelay: 120,
         plugins: { legend: { labels: { boxWidth: 12, font: { size: 11 } } } },
         scales: {
           x: { ticks: { autoSkip: false, maxRotation: 30, minRotation: 0, font: { size: 10 } } },
