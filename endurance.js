@@ -161,6 +161,123 @@
     }));
   }
 
+  // 把云表 12 个参考场景合并进项目：同名场景原样保留、不覆盖，仅补齐缺失项；
+  // 新增场景同步给项目内已有模型补行。返回新增 / 跳过明细，供确认弹窗与提示使用。
+  function mergeDefaultScenarios(project, options) {
+    const version = (options && options.version) || 'UT';
+    const note = (options && options.note) || '云表默认场景电流';
+    const existingNames = new Set((project.scenarios || []).map((s) => s.name));
+    const added = [];
+    const skipped = [];
+    const created = [];
+    defaultScenarioDefs().forEach((def) => {
+      if (existingNames.has(def[0])) { skipped.push(def[0]); return; }
+      const scenario = {
+        id: uid('sc'),
+        name: def[0],
+        remark: def[5],
+        standard: '',
+        customCurrent: '',
+        fields: {},
+        records: [{ id: uid('rec'), date: todayStr(), version: version, current: def[1], note: note }],
+      };
+      project.scenarios.push(scenario);
+      created.push(scenario);
+      added.push(def[0]);
+    });
+    (project.models || []).forEach((model) => {
+      created.forEach((scenario) => {
+        if (model.rows.some((r) => r.scenarioId === scenario.id)) return;
+        const cells = {};
+        model.columns.forEach((col) => { cells[col.id] = { d: '0', m: DEFAULT_MAH_FORMULA }; });
+        model.rows.push({ id: uid('mr'), scenarioId: scenario.id, cells: cells });
+      });
+    });
+    return { added: added, skipped: skipped, created: created };
+  }
+
+  // ---------- 场景电流 vs 功耗标准（方案 A 徽标） ----------
+  // 达标(≤标准)绿色 ✓；超标 0~20% 橙色 ⚠；超标 >20% 红色 ✗。无标准 / 无电流返回 null。
+  function currentCompare(current, standard) {
+    const cur = num(current);
+    const std = num(standard);
+    if (cur === null || std === null || std <= 0) return null;
+    const pct = (cur - std) / std * 100;
+    const level = pct <= 0 ? 'ok' : (pct <= 20 ? 'warn' : 'bad');
+    const rounded = Math.round(pct);
+    let shown;
+    if (rounded === 0 && pct !== 0) {
+      shown = (pct > 0 ? '+' : '−') + Math.abs(pct).toFixed(1) + '%';
+    } else {
+      shown = (rounded > 0 ? '+' : rounded < 0 ? '−' : '') + Math.abs(rounded) + '%';
+    }
+    const icon = level === 'ok' ? '✓' : (level === 'warn' ? '⚠' : '✗');
+    return {
+      level: level,
+      pct: pct,
+      text: icon + ' ' + shown,
+      title: '当前电流相对功耗标准 ' + (pct >= 0 ? '+' : '−') + Math.abs(pct).toFixed(1)
+        + '%；达标（≤标准）绿色，超标 0~20% 橙色，超标 >20% 红色',
+    };
+  }
+
+  // ---------- DOU 网格布局偏好（列宽 / 行高），独立 localStorage，不与业务数据混存 ----------
+  const GRID_LAYOUT_KEY = 'endurance_grid_layout_v1';
+  const GRID_COL_ROLES = ['rownum', 'scenario', 'current', 'duration', 'mah'];
+  // 桌面默认列宽（px）：紧凑、按内容收缩，不强制撑满容器
+  const GRID_DEFAULT_COLW = { rownum: 38, scenario: 150, current: 82, duration: 94, mah: 102 };
+  const GRID_MOBILE_COLW = { rownum: 30, scenario: 116, current: 64, duration: 78, mah: 86 };
+  const GRID_COL_MIN = { rownum: 28, scenario: 88, current: 56, duration: 60, mah: 64 };
+  const GRID_COL_MAX = { rownum: 96, scenario: 320, current: 170, duration: 220, mah: 240 };
+  // 三档行高（px），用户可在工具栏切换
+  const GRID_ROW_H = { compact: 30, normal: 38, comfortable: 48 };
+  const GRID_DEFAULT_ROWH = 'normal';
+
+  function defaultGridColWidths() {
+    const mobile = typeof window !== 'undefined' && window.innerWidth && window.innerWidth <= 640;
+    return Object.assign({}, mobile ? GRID_MOBILE_COLW : GRID_DEFAULT_COLW);
+  }
+  function defaultGridLayout() {
+    return { colWidths: defaultGridColWidths(), rowHeight: GRID_DEFAULT_ROWH };
+  }
+  function loadGridLayout() {
+    const base = defaultGridLayout();
+    try {
+      const raw = localStorage.getItem(GRID_LAYOUT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const cw = parsed && parsed.colWidths && typeof parsed.colWidths === 'object' ? parsed.colWidths : {};
+        GRID_COL_ROLES.forEach((role) => {
+          const v = Number(cw[role]);
+          if (Number.isFinite(v) && v > 0) base.colWidths[role] = Math.round(v);
+        });
+        if (parsed && Object.prototype.hasOwnProperty.call(GRID_ROW_H, parsed.rowHeight)) base.rowHeight = parsed.rowHeight;
+      }
+    } catch (error) { /* 损坏的偏好直接回退默认 */ }
+    return base;
+  }
+  function saveGridLayout(patch) {
+    const cur = loadGridLayout();
+    const nextRowH = patch && Object.prototype.hasOwnProperty.call(GRID_ROW_H, patch.rowHeight)
+      ? patch.rowHeight
+      : cur.rowHeight;
+    const next = {
+      colWidths: Object.assign({}, cur.colWidths, (patch && patch.colWidths) || {}),
+      rowHeight: nextRowH,
+    };
+    try { localStorage.setItem(GRID_LAYOUT_KEY, JSON.stringify(next)); } catch (error) { /* ignore */ }
+    return next;
+  }
+  function resetGridLayout() {
+    try { localStorage.removeItem(GRID_LAYOUT_KEY); } catch (error) { /* ignore */ }
+    return defaultGridLayout();
+  }
+  function clampGridColWidth(role, width) {
+    const min = GRID_COL_MIN[role] || 48;
+    const max = GRID_COL_MAX[role] || 260;
+    return Math.max(min, Math.min(max, Math.round(width)));
+  }
+
   // 首次使用的示例项目：对齐云表「G2 标准版续航模型 V1.0（UT 阶段）」
   function seedData() {
     // 时长取自云表 HrV2LC「续航模型」E/G/I 列，保留 6 位小数以贴近原表汇总
@@ -621,7 +738,9 @@
     computeModeStats, computeModelStats, evaluateModel,
     sortDischargeTable, lookupDischargeCapacity, deriveDischargeRatio,
     DEFAULT_MAH_FORMULA, defaultFoot, createColumn, createModelV2, migrateModelV1,
-    defaultScenarioDefs, buildDefaultScenarios,
+    defaultScenarioDefs, buildDefaultScenarios, mergeDefaultScenarios, currentCompare,
+    GRID_LAYOUT_KEY, GRID_COL_ROLES, GRID_ROW_H, GRID_DEFAULT_ROWH,
+    defaultGridLayout, loadGridLayout, saveGridLayout, resetGridLayout, clampGridColWidth,
     colLetterFor, rowNumberFor, totalRowNumber, douRowNumber, addressOf,
   };
 })();
@@ -1388,11 +1507,17 @@
       const currentText = current === null ? '' : String(current);
       const versionText = rec && rec.version ? String(rec.version) : '';
       const dateText = rec && rec.date ? String(rec.date) : '';
+      // 方案 A：当前电流相对功耗标准的达标徽标（无标准 / 无电流则不渲染）
+      const cmp = E.currentCompare(current, scenario.standard);
+      const cmpBadge = cmp
+        ? '<em class="es-cmp-badge es-cmp-' + cmp.level + '" title="' + escapeHtml(cmp.title) + '">' + escapeHtml(cmp.text) + '</em>'
+        : '';
       const currentCell = '<td class="es-sc-current">'
         + '<div class="es-inline-input-wrap">'
         + '<input type="text" inputmode="decimal" class="es-field-input es-current-input" data-es-current="' + escapeHtml(scenario.id) + '"'
         + ' data-es-current-orig="' + escapeHtml(isCustom ? currentText : '') + '"'
         + ' value="' + escapeHtml(currentText) + '" placeholder="自定义电流 mA" autocomplete="off" />'
+        + cmpBadge
         + (isCustom ? '<em class="es-custom-chip" title="自定义电流，不来自测试记录">自定义</em>'
           + '<button type="button" class="es-icon-btn es-inline-clear" data-es-action="clear-custom" title="清除自定义，恢复测试记录电流"><span class="material-symbols-outlined">restart_alt</span></button>' : '')
         + '</div></td>';
@@ -1431,6 +1556,7 @@
     return '<section class="panel rounded-3xl es-card">'
       + '<header class="es-card-head"><h3><span class="material-symbols-outlined">bolt</span>场景电流</h3>'
       + '<div class="es-head-actions">'
+      + '<button type="button" class="template-btn template-btn-sm" data-es-action="load-default-scenarios"><span class="material-symbols-outlined text-sm">download</span>载入参考场景</button>'
       + '<button type="button" class="template-btn template-btn-sm" data-es-add-field><span class="material-symbols-outlined text-sm">view_column</span>新增列</button>'
       + '<button type="button" class="template-btn template-btn-sm es-add-scenario-btn"><span class="material-symbols-outlined text-sm">add</span>新增场景</button>'
       + '</div></header>'
@@ -1449,36 +1575,69 @@
     return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
   }
 
+  // 方案 A 徽标就地刷新：直接读行内输入框当前值，标准 / 电流编辑时即时更新，无需整卡重绘
+  function refreshRowBadge(tr) {
+    if (!tr) return;
+    const stdInput = tr.querySelector('.es-standard-input');
+    const curInput = tr.querySelector('.es-current-input');
+    const wrap = tr.querySelector('.es-sc-current .es-inline-input-wrap');
+    if (!stdInput || !curInput || !wrap) return;
+    const cmp = E.currentCompare(curInput.value, stdInput.value);
+    let badge = wrap.querySelector('.es-cmp-badge');
+    if (!cmp) {
+      if (badge) badge.remove();
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement('em');
+      badge.className = 'es-cmp-badge';
+      const input = wrap.querySelector('.es-current-input');
+      wrap.insertBefore(badge, input ? input.nextSibling : wrap.firstChild);
+    }
+    badge.className = 'es-cmp-badge es-cmp-' + cmp.level;
+    badge.title = cmp.title;
+    badge.textContent = cmp.text;
+  }
+
   function bindScenarios(project) {
     root.querySelectorAll('.es-add-scenario-btn').forEach((addBtn) => {
       addBtn.addEventListener('click', () => openScenarioEditor(project, null));
     });
 
-    const loadDefaultBtn = root.querySelector('[data-es-action="load-default-scenarios"]');
-    if (loadDefaultBtn) {
-      loadDefaultBtn.addEventListener('click', async () => {
-        if (project.scenarios.length) return;
+    // 载入云表参考场景：任意项目可用，同名场景原样保留、仅补齐缺失项（不覆盖已有电流）
+    root.querySelectorAll('[data-es-action="load-default-scenarios"]').forEach((loadBtn) => {
+      loadBtn.addEventListener('click', async () => {
+        const existingNames = new Set(project.scenarios.map((s) => s.name));
+        const defs = E.defaultScenarioDefs();
+        const missing = defs.filter((d) => !existingNames.has(d[0]));
+        const skipCount = defs.length - missing.length;
+        if (!missing.length) {
+          await window.ES_MODAL.alert({
+            title: '参考场景已齐全', icon: 'download',
+            message: '云表 12 个参考场景已全部存在，无需重复载入；如需更新电流可直接在「当前电流」中修改。',
+          });
+          return;
+        }
+        const message = '将补齐 ' + missing.length + ' 个缺失的参考场景，并附上 UT 阶段场景电流（mA）：\n'
+          + missing.map((d) => d[0]).join('、')
+          + (skipCount ? '\n另有 ' + skipCount + ' 个同名场景已存在，会原样保留、不会覆盖其电流。' : '')
+          + '\n载入后仍可随时修改或删除。';
         const ok = await window.ES_MODAL.confirm({
-          title: '载入默认场景', icon: 'download',
-          message: '将载入云表「续航模型」的 12 个标准场景，并附上 UT 阶段场景电流（mA）。载入后仍可随时修改或删除。',
-          confirmText: '载入',
+          title: '载入参考场景', icon: 'download', message: message, confirmText: '载入',
         });
         if (!ok) return;
-        const created = E.buildDefaultScenarios();
-        project.scenarios = created;
-        // 项目已有模型时同步补齐对应行（时长默认 0），保持模型网格完整
-        project.models.forEach((model) => {
-          created.forEach((scenario) => {
-            if (model.rows.some((r) => r.scenarioId === scenario.id)) return;
-            const cells = {};
-            model.columns.forEach((col) => { cells[col.id] = { d: '0', m: E.DEFAULT_MAH_FORMULA }; });
-            model.rows.push({ id: uid('mr'), scenarioId: scenario.id, cells: cells });
-          });
-        });
+        const result = E.mergeDefaultScenarios(project);
         E.store.save();
         window.ES_ENDURANCE_UI.render();
+        if (result.added.length) {
+          await window.ES_MODAL.alert({
+            title: '载入完成', icon: 'check_circle',
+            message: '已新增 ' + result.added.length + ' 个参考场景'
+              + (result.skipped.length ? '，保留 ' + result.skipped.length + ' 个同名场景。' : '。'),
+          });
+        }
       });
-    }
+    });
 
     root.querySelector('[data-es-add-field]').addEventListener('click', async () => {
       if (!Array.isArray(project.scenarioFields)) project.scenarioFields = [];
@@ -1519,10 +1678,20 @@
     root.querySelectorAll('.es-standard-input').forEach((input) => {
       input.addEventListener('blur', () => {
         const scenario = project.scenarios.find((s) => s.id === input.dataset.esStandard);
-        if (!scenario || scenario.standard === input.value) return;
-        scenario.standard = input.value.trim();
-        E.store.save();
+        if (!scenario) return;
+        if (scenario.standard !== input.value) {
+          scenario.standard = input.value.trim();
+          E.store.save();
+        }
+        refreshRowBadge(input.closest('tr'));
       });
+    });
+    // 方案 A：功耗标准 / 当前电流输入时，徽标就地实时联动（不打断输入焦点）
+    root.querySelectorAll('.es-scenario-table tbody tr[data-es-scenario]').forEach((tr) => {
+      const std = tr.querySelector('.es-standard-input');
+      const cur = tr.querySelector('.es-current-input');
+      if (std) std.addEventListener('input', () => refreshRowBadge(tr));
+      if (cur) cur.addEventListener('input', () => refreshRowBadge(tr));
     });
     root.querySelectorAll('.es-remark-input').forEach((input) => {
       input.addEventListener('blur', () => {
@@ -1854,27 +2023,39 @@
 
   function renderModelBody(project, model) {
     const ev = E.evaluateModel(project, model);
+    const layout = E.loadGridLayout();
+    const dataRowH = E.GRID_ROW_H[layout.rowHeight] || E.GRID_ROW_H[E.GRID_DEFAULT_ROWH];
 
-    // Excel 风格列标行：A=场景；电流展示列不占地址；对比列从 B/C 开始
+    // 列宽 / 行高可自定义：宽度按角色内联到 col，行高经 CSS 变量下发；表格按内容收缩、不撑满容器
+    const colEl = (role, cls) => '<col class="' + cls + '" data-col-role="' + role
+      + '" style="width:' + layout.colWidths[role] + 'px; min-width:' + layout.colWidths[role] + 'px" />';
+
+    // Excel 风格列标行：A=场景；电流展示列不占地址；对比列从 B/C 开始；每列右缘带拖拽手柄
+    const resizeHandle = (role) => '<span class="es-col-resize" data-col-role="' + role
+      + '" title="拖拽调整列宽，双击恢复默认"></span>';
     const colBar = '<tr class="es-excel-colbar">'
       + '<th class="es-excel-rowhead"></th>'
-      + '<th class="es-excel-colhead">A</th>'
-      + '<th class="es-excel-colhead es-excel-noaddr"></th>'
+      + '<th class="es-excel-colhead">' + resizeHandle('scenario') + 'A</th>'
+      + '<th class="es-excel-colhead es-excel-noaddr">' + resizeHandle('current') + '</th>'
       + model.columns.map((col, ci) => {
         const dLetter = E.colLetterFor(ci, 'd');
         const mLetter = E.colLetterFor(ci, 'm');
-        return '<th class="es-excel-colhead">' + dLetter + '</th><th class="es-excel-colhead">' + mLetter + '</th>';
+        return '<th class="es-excel-colhead">' + resizeHandle('duration') + dLetter
+          + '</th><th class="es-excel-colhead">' + resizeHandle('mah') + mLetter + '</th>';
       }).join('') + '</tr>';
 
     // colgroup 精确控宽（table-layout:fixed 下列标行与数据行严格对齐）：
-    // 行号 2.2rem / 场景 11rem / 电流 5.5rem / 每个时长·耗电列各 6+6.5rem
-    // fixed 布局下表格须显式宽度 col 宽度才生效，总宽经 CSS 变量按列数计算（手机端在媒体查询中重算）
-    const colGroup = '<colgroup><col class="es-col-rownum" /><col class="es-col-scenario" /><col class="es-col-current" />'
-      + model.columns.map(() => '<col class="es-col-duration" /><col class="es-col-mah" />').join('')
+    // 行号 / 场景 / 电流 + 每个对比列的时长·耗电，宽度来自布局偏好，用户拖拽后持久化
+    const colGroup = '<colgroup>' + colEl('rownum', 'es-col-rownum') + colEl('scenario', 'es-col-scenario')
+      + colEl('current', 'es-col-current')
+      + model.columns.map(() => colEl('duration', 'es-col-duration') + colEl('mah', 'es-col-mah')).join('')
       + '</colgroup>';
+    // 表格显式宽度 = 各列宽之和：fixed 布局下严格按设定列宽渲染、不被内容撑宽，也不撑满容器
+    const tableWidth = layout.colWidths.rownum + layout.colWidths.scenario + layout.colWidths.current
+      + model.columns.length * (layout.colWidths.duration + layout.colWidths.mah);
 
     // 两行表头
-    const headTop = '<th class="es-corner es-excel-rowhead" rowspan="3"></th><th class="es-corner" rowspan="3">场景</th><th rowspan="3">电流 mA</th>'
+    const headTop = '<th class="es-corner es-excel-rowhead" rowspan="3" title="行号（公式地址中的行，如 B2）"></th><th class="es-corner" rowspan="3">场景</th><th rowspan="3">电流 mA</th>'
       + model.columns.map((col, ci) => {
         const tag = col.kind === 'full' ? '<em class="es-mode-tag">满电</em>' : '';
         const win = col.window ? '<small>' + escapeHtml(col.window) + '</small>' : '';
@@ -1913,7 +2094,7 @@
           + '</td>';
         return dInput + formulaCellHtml(ev, model, mDesc);
       }).join('');
-      return '<tr data-es-model-row="' + escapeHtml(row.id) + '"><th class="es-excel-rownum">' + E.rowNumberFor(rowIndex) + '</th><td class="es-sc-name" title="' + escapeHtml(scenarioName) + '">' + escapeHtml(scenarioName) + '</td>'
+      return '<tr data-es-model-row="' + escapeHtml(row.id) + '"><th class="es-excel-rownum" title="行号（公式地址中的行）">' + E.rowNumberFor(rowIndex) + '</th><td class="es-sc-name" title="' + escapeHtml(scenarioName) + '">' + escapeHtml(scenarioName) + '</td>'
         + '<td class="es-current-cell">' + (current === null ? '—' : fmt(current, 2)) + '</td>' + cells + '</tr>';
     }).join('');
 
@@ -1938,14 +2119,25 @@
       + douRow('可使用时长（Typ）h', 'douTyp', true)
       + douRow('可使用时长（Min）h', 'douMin', false);
 
+    const rowHeightBtn = (key, label) => '<button type="button" class="es-mini-btn es-rowh-btn'
+      + (layout.rowHeight === key ? ' is-on' : '') + '" data-es-row-h="' + key + '">' + label + '</button>';
+    const rowHeightGroup = '<div class="es-rowh-group" role="group" aria-label="行高设置">'
+      + '<span class="es-rowh-label">行高</span>'
+      + rowHeightBtn('compact', '紧凑') + rowHeightBtn('normal', '标准') + rowHeightBtn('comfortable', '宽松')
+      + '</div>';
+
     return '<div class="es-mode-toolbar">'
       + '<button type="button" class="es-mini-btn" data-es-model-action="add-row"><span class="material-symbols-outlined">playlist_add</span>新增场景行</button>'
       + '<button type="button" class="es-mini-btn" data-es-model-action="add-col"><span class="material-symbols-outlined">view_column</span>新增对比列</button>'
       + '<button type="button" class="es-mini-btn" data-es-model-action="rename"><span class="material-symbols-outlined">drive_file_rename_outline</span>重命名模型</button>'
       + '<button type="button" class="es-mini-btn" data-es-model-action="help"><span class="material-symbols-outlined">function</span>公式说明</button>'
+      + rowHeightGroup
+      + '<button type="button" class="es-mini-btn" data-es-model-action="reset-layout"><span class="material-symbols-outlined">restart_alt</span>重置列宽/行高</button>'
       + '<button type="button" class="es-mini-btn es-mini-danger" data-es-model-action="delete-model"><span class="material-symbols-outlined">delete</span>删除模型</button>'
       + '</div>'
-      + '<div class="es-model-table-wrap"><table class="es-model-table es-excel-grid" style="--es-col-count:' + model.columns.length + '">' + colGroup + '<thead>' + colBar + '<tr>' + headTop + '</tr><tr>' + headSub + '</tr></thead>'
+      + '<div class="es-model-table-wrap"><table class="es-model-table es-excel-grid" data-row-height="' + layout.rowHeight
+      + '" style="width:' + tableWidth + 'px; min-width:' + tableWidth + 'px; --es-data-row-h:' + dataRowH
+      + 'px; --es-foot-row-h:' + (dataRowH + 4) + 'px">' + colGroup + '<thead>' + colBar + '<tr>' + headTop + '</tr><tr>' + headSub + '</tr></thead>'
       + '<tbody>' + (body || '<tr><td colspan="' + (3 + model.columns.length * 2) + '" class="es-table-empty">请先在上方「场景电流」中新增场景，或点工具栏「新增场景行」</td></tr>') + '</tbody>'
       + '<tfoot>' + totals + '</tfoot></table></div>'
       + '<p class="es-model-tip"><span class="material-symbols-outlined">info</span>'
@@ -2013,6 +2205,56 @@
   }
 
   // ---------- 事件绑定 ----------
+  // ---------- 列宽拖拽（Pointer Events，桌面 / 触屏通用；同角色所有列联动，偏好持久化） ----------
+  function bindGridColumnResize() {
+    const table = root.querySelector('.es-excel-grid');
+    if (!table) return;
+    const cols = Array.prototype.slice.call(table.querySelectorAll('colgroup col[data-col-role]'));
+    const syncTableWidth = () => {
+      const total = cols.reduce((sum, c) => sum + (c.getBoundingClientRect().width || 0), 0);
+      if (total > 0) {
+        table.style.width = Math.round(total) + 'px';
+        table.style.minWidth = Math.round(total) + 'px';
+      }
+    };
+    const applyWidth = (role, width) => {
+      const w = E.clampGridColWidth(role, width);
+      cols.forEach((c) => { if (c.dataset.colRole === role) c.style.width = w + 'px'; });
+      syncTableWidth();
+      return w;
+    };
+    table.querySelectorAll('.es-col-resize').forEach((handle) => {
+      handle.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const role = handle.dataset.colRole;
+        const roleCols = cols.filter((c) => c.dataset.colRole === role);
+        const startX = event.clientX;
+        const startW = roleCols.length ? roleCols[0].getBoundingClientRect().width : E.loadGridLayout().colWidths[role];
+        document.body.classList.add('es-col-resizing');
+        const onMove = (ev) => applyWidth(role, startW + (ev.clientX - startX));
+        const onUp = () => {
+          document.removeEventListener('pointermove', onMove);
+          document.removeEventListener('pointerup', onUp);
+          document.body.classList.remove('es-col-resizing');
+          const finalW = roleCols.length ? Math.round(roleCols[0].getBoundingClientRect().width) : startW;
+          E.saveGridLayout({ colWidths: { [role]: E.clampGridColWidth(role, finalW) } });
+        };
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+      });
+      // 双击手柄：该角色恢复默认列宽
+      handle.addEventListener('dblclick', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const role = handle.dataset.colRole;
+        const w = E.defaultGridLayout().colWidths[role];
+        applyWidth(role, w);
+        E.saveGridLayout({ colWidths: { [role]: w } });
+      });
+    });
+  }
+
   function bindModels(project) {
     const quietRefreshCompare = debounce(() => {
       window.ES_ENDURANCE_UI.refreshCompareQuiet && window.ES_ENDURANCE_UI.refreshCompareQuiet();
@@ -2034,6 +2276,17 @@
     root.querySelectorAll('[data-es-col-delete]').forEach((btn) => {
       btn.addEventListener('click', () => deleteColumn(project, activeModel(project), btn.dataset.esColDelete));
     });
+
+    // 行高三档切换（紧凑 / 标准 / 宽松），偏好持久化
+    root.querySelectorAll('[data-es-row-h]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        E.saveGridLayout({ rowHeight: btn.dataset.esRowH });
+        window.ES_ENDURANCE_UI.render();
+      });
+    });
+
+    // 列宽拖拽 / 双击恢复默认
+    bindGridColumnResize();
 
     // fx 公式编辑
     root.querySelectorAll('[data-es-fx]').forEach((btn) => {
@@ -2079,17 +2332,25 @@
   async function handleModelAction(project, action) {
     const model = activeModel(project);
     if (action === 'add') {
-      const name = await window.ES_MODAL.prompt({
-        title: '新建续航模型', icon: 'add_chart', label: '模型名称',
-        value: '续航模型 ' + (project.models.length + 1),
-        confirmText: '新建',
-        validate: (raw) => ((raw || '').trim() ? null : '模型名称不能为空'),
+      const values = await window.ES_MODAL.form({
+        title: '新建续航模型', icon: 'add_chart', confirmText: '新建',
+        fields: [
+          { key: 'projectName', label: '项目名称（必填）', value: project.name, placeholder: '模型归属项目；若不存在将自动新建该项目' },
+          { key: 'modelName', label: '模型名称（选填）', value: '', placeholder: '留空则自动命名为「续航模型 N」' },
+        ],
+        validate: (v) => ((v.projectName || '').trim() ? null : '项目名称不能为空'),
       });
-      if (name === null) return;
-      const created = E.createModelV2(project, name.trim(), [{ name: '典型使用', kind: 'normal' }]);
-      project.models.push(created);
-      project.activeModelId = created.id;
+      if (values === null) return;
+      const projectName = values.projectName.trim();
+      const all = E.store.load();
+      let target = all.projects.find((p) => p.name === projectName);
+      if (!target) target = E.store.addProject(projectName); // 不存在则新建项目（自带 12 参考场景）并切换为当前
+      const modelName = (values.modelName || '').trim() || ('续航模型 ' + (target.models.length + 1));
+      const created = E.createModelV2(target, modelName, [{ name: '典型使用', kind: 'normal' }]);
+      target.models.push(created);
+      target.activeModelId = created.id;
       E.store.save();
+      if (target.id !== project.id) E.store.setActive(target.id);
       window.ES_ENDURANCE_UI.render();
       return;
     }
@@ -2109,6 +2370,11 @@
       return;
     }
     if (action === 'help') { openFormulaHelp(activeModel(project)); return; }
+    if (action === 'reset-layout') {
+      E.resetGridLayout();
+      window.ES_ENDURANCE_UI.render();
+      return;
+    }
     if (!model) return;
     if (action === 'rename') {
       const name = await window.ES_MODAL.prompt({

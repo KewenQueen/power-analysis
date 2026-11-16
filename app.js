@@ -255,6 +255,8 @@ function clearTransientCaches() {
       'qepm_config_gen_options_v1',
       // 续航/功耗现状：项目、电池参数、场景电流台账与 DOU 续航模型
       'endurance_status_v1',
+      // 续航 DOU 网格布局偏好（自定义列宽 / 行高），刷新后需保留
+      'endurance_grid_layout_v1',
     ]);
     const keepValues = {};
     keepKeys.forEach((key) => {
