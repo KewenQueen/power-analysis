@@ -1167,7 +1167,7 @@ body.es-col-resizing * { user-select: none !important; }
   border-color: #4f46e5;
 }
 
-/* 备注/说明列（最右侧，纯文本，不参与公式） */
+/* 备注/说明列（位于电流列之后、模型列之前，纯文本，不参与公式） */
 .es-excel-grid .es-note-head { white-space: nowrap; }
 .es-excel-grid .es-note-cell { padding: 0 !important; background: #fff; }
 .es-excel-grid .es-note-input {

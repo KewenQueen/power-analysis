@@ -224,7 +224,7 @@
   // ---------- DOU 网格布局偏好（列宽 / 行高），独立 localStorage，不与业务数据混存 ----------
   const GRID_LAYOUT_KEY = 'endurance_grid_layout_v1';
   const GRID_COL_ROLES = ['rownum', 'scenario', 'current', 'duration', 'mah', 'note'];
-  // 桌面默认列宽（px）：紧凑、按内容收缩，不强制撑满容器；note 为最右侧备注/说明列
+  // 桌面默认列宽（px）：紧凑、按内容收缩，不强制撑满容器；note 为电流列之后的备注/说明列
   const GRID_DEFAULT_COLW = { rownum: 38, scenario: 150, current: 82, duration: 94, mah: 102, note: 160 };
   const GRID_MOBILE_COLW = { rownum: 30, scenario: 116, current: 64, duration: 78, mah: 86, note: 120 };
   const GRID_COL_MIN = { rownum: 28, scenario: 88, current: 56, duration: 60, mah: 64, note: 80 };
@@ -2030,36 +2030,36 @@
     const colEl = (role, cls) => '<col class="' + cls + '" data-col-role="' + role
       + '" style="width:' + layout.colWidths[role] + 'px; min-width:' + layout.colWidths[role] + 'px" />';
 
-    // Excel 风格列标行：A=场景；电流展示列不占地址；对比列从 B/C 开始；每列右缘带拖拽手柄
+    // Excel 风格列标行：A=场景；电流 / 备注为展示列不占公式地址；模型对比列从 B/C 开始；每列右缘带拖拽手柄
     const resizeHandle = (role) => '<span class="es-col-resize" data-col-role="' + role
       + '" title="拖拽调整列宽，双击恢复默认"></span>';
     const colBar = '<tr class="es-excel-colbar">'
       + '<th class="es-excel-rowhead"></th>'
       + '<th class="es-excel-colhead">' + resizeHandle('scenario') + 'A</th>'
       + '<th class="es-excel-colhead es-excel-noaddr">' + resizeHandle('current') + '</th>'
+      + '<th class="es-excel-colhead es-excel-noaddr">' + resizeHandle('note') + '</th>'
       + model.columns.map((col, ci) => {
         const dLetter = E.colLetterFor(ci, 'd');
         const mLetter = E.colLetterFor(ci, 'm');
         return '<th class="es-excel-colhead">' + resizeHandle('duration') + dLetter
           + '</th><th class="es-excel-colhead">' + resizeHandle('mah') + mLetter + '</th>';
       }).join('')
-      + '<th class="es-excel-colhead es-excel-noaddr">' + resizeHandle('note') + '</th>'
       + '</tr>';
 
     // colgroup 精确控宽（table-layout:fixed 下列标行与数据行严格对齐）：
-    // 行号 / 场景 / 电流 + 每个对比列的时长·耗电 + 末尾备注/说明，宽度来自布局偏好，用户拖拽后持久化
+    // 行号 / 场景(A) / 电流 / 备注(C) + 每个对比列的时长·耗电；宽度来自布局偏好，用户拖拽后持久化
     const colGroup = '<colgroup>' + colEl('rownum', 'es-col-rownum') + colEl('scenario', 'es-col-scenario')
       + colEl('current', 'es-col-current')
-      + model.columns.map(() => colEl('duration', 'es-col-duration') + colEl('mah', 'es-col-mah')).join('')
       + colEl('note', 'es-col-note')
+      + model.columns.map(() => colEl('duration', 'es-col-duration') + colEl('mah', 'es-col-mah')).join('')
       + '</colgroup>';
     // 表格显式宽度 = 各列宽之和：fixed 布局下严格按设定列宽渲染、不被内容撑宽，也不撑满容器
     const tableWidth = layout.colWidths.rownum + layout.colWidths.scenario + layout.colWidths.current
       + model.columns.length * (layout.colWidths.duration + layout.colWidths.mah)
       + layout.colWidths.note;
 
-    // 两行表头
-    const headTop = '<th class="es-corner es-excel-rowhead" rowspan="3" title="行号（公式地址中的行，如 B2）"></th><th class="es-corner" rowspan="3">场景</th><th rowspan="3">电流 mA</th>'
+    // 两行表头：行号 / 场景 / 电流 / 备注 均跨 3 行，备注紧随电流位于 C 列，模型列在其右侧连续排列
+    const headTop = '<th class="es-corner es-excel-rowhead" rowspan="3" title="行号（公式地址中的行，如 B2）"></th><th class="es-corner" rowspan="3">场景</th><th rowspan="3">电流 mA</th><th class="es-corner es-note-head" rowspan="3" title="本行场景的备注 / 说明，不参与公式计算">备注/说明</th>'
       + model.columns.map((col, ci) => {
         const tag = col.kind === 'full' ? '<em class="es-mode-tag">满电</em>' : '';
         const win = col.window ? '<small>' + escapeHtml(col.window) + '</small>' : '';
@@ -2074,14 +2074,15 @@
         const mLetter = E.colLetterFor(ci, 'm');
         return '<th class="es-mode-head" colspan="2"><div class="es-mode-title">' + escapeHtml(col.name) + tag + ops + '</div>'
           + '<small class="es-col-addr">时长列 ' + dLetter + ' / 耗电列 ' + mLetter + '</small>' + win + need + note + '</th>';
-      }).join('')
-      + '<th class="es-corner es-note-head" rowspan="3" title="本行场景的备注 / 说明，不参与公式计算">备注/说明</th>';
+      }).join('');
     const headSub = model.columns.map(() => '<th class="es-sub">时长 h</th><th class="es-sub">耗电量 mAh</th>').join('');
 
     const body = model.rows.map((row, rowIndex) => {
       const scenario = project.scenarios.find((s) => s.id === row.scenarioId);
       const scenarioName = scenario ? scenario.name : '（场景已删除）';
       const current = scenario ? E.scenarioCurrent(project, scenario.id) : null;
+      const noteCell = '<td class="es-note-cell"><input type="text" class="es-note-input" data-es-row-note="'
+        + escapeHtml(row.id) + '" value="' + escapeHtml(row.note || '') + '" placeholder="备注/说明" autocomplete="off" /></td>';
       const cells = model.columns.map((col, ci) => {
         const cell = row.cells[col.id] || { d: '', m: E.DEFAULT_MAH_FORMULA };
         const dDesc = { kind: 'cell', rowId: row.id, colId: col.id, t: 'd' };
@@ -2099,29 +2100,27 @@
           + '</td>';
         return dInput + formulaCellHtml(ev, model, mDesc);
       }).join('');
-      const noteCell = '<td class="es-note-cell"><input type="text" class="es-note-input" data-es-row-note="'
-        + escapeHtml(row.id) + '" value="' + escapeHtml(row.note || '') + '" placeholder="备注/说明" autocomplete="off" /></td>';
       return '<tr data-es-model-row="' + escapeHtml(row.id) + '"><th class="es-excel-rownum" title="行号（公式地址中的行）">' + E.rowNumberFor(rowIndex) + '</th><td class="es-sc-name" title="' + escapeHtml(scenarioName) + '">' + escapeHtml(scenarioName) + '</td>'
-        + '<td class="es-current-cell">' + (current === null ? '—' : fmt(current, 2)) + '</td>' + cells + noteCell + '</tr>';
+        + '<td class="es-current-cell">' + (current === null ? '—' : fmt(current, 2)) + '</td>' + noteCell + cells + '</tr>';
     }).join('');
 
     // tfoot：总时长/总耗电（可编辑公式）、平均电流（自动）、可使用时长 Typ/Min（可编辑公式）
-    // 每个对比列含 时长 / 耗电 两个子格，严格与表体对齐；汇总行电流列留空不展示，末尾备注列留空
+    // 列顺序与表体对齐：标签 / 电流留空 / 备注留空 / 各模型时长·耗电；汇总行电流列不展示
     const statBlankNote = '<td class="es-stat-blank"></td>';
-    const totalRowHtml = '<tr class="es-stat-row"><th class="es-excel-rownum">' + E.totalRowNumber(model) + '</th><td>Total（可编辑公式）</td><td class="es-stat-current-blank" title="汇总行不展示电流；时长与耗电量均为 SUM"></td>'
+    const totalRowHtml = '<tr class="es-stat-row"><th class="es-excel-rownum">' + E.totalRowNumber(model) + '</th><td>Total（可编辑公式）</td><td class="es-stat-current-blank" title="汇总行不展示电流；时长与耗电量均为 SUM"></td>' + statBlankNote
       + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'td' }, 2)
-        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'tm' }, 2)).join('') + statBlankNote + '</tr>';
+        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'tm' }, 2)).join('') + '</tr>';
 
-    const avgRow = '<tr class="es-stat-row es-stat-auto"><th class="es-excel-rownum es-excel-noaddr"></th><td>平均电流 mA（自动）</td><td class="es-stat-current-blank"></td>'
+    const avgRow = '<tr class="es-stat-row es-stat-auto"><th class="es-excel-rownum es-excel-noaddr"></th><td>平均电流 mA（自动）</td><td class="es-stat-current-blank"></td>' + statBlankNote
       + model.columns.map((col) => {
         const s = ev.stats[col.id] || {};
         return '<td colspan="2" class="es-stat-mah">' + (s.avgCurrent === null ? '—' : fmt(s.avgCurrent, 2)) + '</td>';
-      }).join('') + statBlankNote + '</tr>';
+      }).join('') + '</tr>';
 
     const douRow = (label, cellType, withRowNum) => '<tr class="es-stat-row"><th class="es-excel-rownum' + (withRowNum ? '' : ' es-excel-noaddr') + '">'
-      + (withRowNum ? E.douRowNumber(model) : '') + '</th><td>' + label + '</td><td class="es-stat-current-blank"></td>'
+      + (withRowNum ? E.douRowNumber(model) : '') + '</th><td>' + label + '</td><td class="es-stat-current-blank"></td>' + statBlankNote
       + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: cellType }, 2)
-        + '<td class="es-stat-blank"></td>').join('') + statBlankNote + '</tr>';
+        + '<td class="es-stat-blank"></td>').join('') + '</tr>';
 
     const totals = totalRowHtml + avgRow
       + douRow('可使用时长（Typ）h', 'douTyp', true)
