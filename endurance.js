@@ -129,11 +129,10 @@
     return { v: 2, id: model.id, name: model.name, columns: columns, rows: rows, foot: foot };
   }
 
-  // 首次使用的示例项目：对齐云表「G2 标准版续航模型 V1.0（UT 阶段）」
-  function seedData() {
-    // [场景名, 场景电流 mA, UT原始模型(3H) 时长, 环境记忆常开 时长, 重度模型 时长, 备注]
-    // 时长取自云表 HrV2LC「续航模型」E/G/I 列，保留 6 位小数以贴近原表汇总
-    const scenarioDefs = [
+  // 云表 HrV2LC「续航模型」默认 12 场景及其场景电流（K 列，mA）
+  // [场景名, 场景电流 mA, UT原始模型(3H) 时长, 环境记忆常开 时长, 重度模型 时长, 备注]
+  function defaultScenarioDefs() {
+    return [
       ['音乐', 22.82, 1.5, 0, 0, ''],
       ['音乐+环境记忆', 27.44, 0, 1.5, 1.5, ''],
       ['蓝牙通话', 21.8, 2, 2, 2, ''],
@@ -147,15 +146,26 @@
       ['待机+环境-中档', 19.5, 1, 1.962222, 1.784444, ''],
       ['待机', 10.31, 2.886667, 0, 0, ''],
     ];
-    const scenarios = scenarioDefs.map((def) => ({
+  }
+
+  // 构建默认 12 场景，电流直接作为一条 UT 测试记录附上（新项目 / 空项目一键载入共用）
+  function buildDefaultScenarios(version, note) {
+    return defaultScenarioDefs().map((def) => ({
       id: uid('sc'),
       name: def[0],
       remark: def[5],
       standard: '',
       customCurrent: '',
       fields: {},
-      records: [{ id: uid('rec'), date: todayStr(), version: 'UT', current: def[1], note: '示例数据' }],
+      records: [{ id: uid('rec'), date: todayStr(), version: version || 'UT', current: def[1], note: note || '云表默认场景电流' }],
     }));
+  }
+
+  // 首次使用的示例项目：对齐云表「G2 标准版续航模型 V1.0（UT 阶段）」
+  function seedData() {
+    // 时长取自云表 HrV2LC「续航模型」E/G/I 列，保留 6 位小数以贴近原表汇总
+    const scenarioDefs = defaultScenarioDefs();
+    const scenarios = buildDefaultScenarios('UT', '示例数据');
     const byName = {};
     scenarios.forEach((s) => { byName[s.name] = s.id; });
 
@@ -332,7 +342,8 @@
         createdAt: Date.now(),
         scenarioFields: [],
         battery: defaultBattery(),
-        scenarios: [],
+        // 新项目默认载入云表 12 个标准场景及对应场景电流，开箱即可计算
+        scenarios: buildDefaultScenarios(),
         models: [],
         activeModelId: null,
       };
@@ -610,6 +621,7 @@
     computeModeStats, computeModelStats, evaluateModel,
     sortDischargeTable, lookupDischargeCapacity, deriveDischargeRatio,
     DEFAULT_MAH_FORMULA, defaultFoot, createColumn, createModelV2, migrateModelV1,
+    defaultScenarioDefs, buildDefaultScenarios,
     colLetterFor, rowNumberFor, totalRowNumber, douRowNumber, addressOf,
   };
 })();
@@ -1409,6 +1421,13 @@
     }).join('');
 
     const colCount = 7 + customFields.length;
+    const emptyHtml = '<tr><td colspan="' + colCount + '" class="es-table-empty es-scenario-empty">'
+      + '<div class="es-empty-msg">还没有场景，可载入云表默认的 12 个标准场景（含 UT 阶段场景电流），也可以手动新增场景</div>'
+      + '<div class="es-empty-actions">'
+      + '<button type="button" class="template-btn template-btn-primary template-btn-sm" data-es-action="load-default-scenarios">'
+      + '<span class="material-symbols-outlined text-sm">download</span>载入默认 12 场景（含电流）</button>'
+      + '<button type="button" class="template-btn template-btn-sm es-add-scenario-btn"><span class="material-symbols-outlined text-sm">add</span>手动新增场景</button>'
+      + '</div></td></tr>';
     return '<section class="panel rounded-3xl es-card">'
       + '<header class="es-card-head"><h3><span class="material-symbols-outlined">bolt</span>场景电流</h3>'
       + '<div class="es-head-actions">'
@@ -1416,7 +1435,7 @@
       + '<button type="button" class="template-btn template-btn-sm es-add-scenario-btn"><span class="material-symbols-outlined text-sm">add</span>新增场景</button>'
       + '</div></header>'
       + '<div class="es-table-wrap"><table class="es-table es-scenario-table"><thead><tr>' + head + '</tr></thead><tbody>'
-      + (rows || '<tr><td colspan="' + colCount + '" class="es-table-empty">还没有场景，点右上角「新增场景」开始维护；测试电流按日期/版本留痕，也可直接填写自定义电流</td></tr>')
+      + (rows || emptyHtml)
       + '</tbody></table></div></section>';
   }
 
@@ -1431,8 +1450,35 @@
   }
 
   function bindScenarios(project) {
-    const addBtn = root.querySelector('.es-add-scenario-btn');
-    if (addBtn) addBtn.addEventListener('click', () => openScenarioEditor(project, null));
+    root.querySelectorAll('.es-add-scenario-btn').forEach((addBtn) => {
+      addBtn.addEventListener('click', () => openScenarioEditor(project, null));
+    });
+
+    const loadDefaultBtn = root.querySelector('[data-es-action="load-default-scenarios"]');
+    if (loadDefaultBtn) {
+      loadDefaultBtn.addEventListener('click', async () => {
+        if (project.scenarios.length) return;
+        const ok = await window.ES_MODAL.confirm({
+          title: '载入默认场景', icon: 'download',
+          message: '将载入云表「续航模型」的 12 个标准场景，并附上 UT 阶段场景电流（mA）。载入后仍可随时修改或删除。',
+          confirmText: '载入',
+        });
+        if (!ok) return;
+        const created = E.buildDefaultScenarios();
+        project.scenarios = created;
+        // 项目已有模型时同步补齐对应行（时长默认 0），保持模型网格完整
+        project.models.forEach((model) => {
+          created.forEach((scenario) => {
+            if (model.rows.some((r) => r.scenarioId === scenario.id)) return;
+            const cells = {};
+            model.columns.forEach((col) => { cells[col.id] = { d: '0', m: E.DEFAULT_MAH_FORMULA }; });
+            model.rows.push({ id: uid('mr'), scenarioId: scenario.id, cells: cells });
+          });
+        });
+        E.store.save();
+        window.ES_ENDURANCE_UI.render();
+      });
+    }
 
     root.querySelector('[data-es-add-field]').addEventListener('click', async () => {
       if (!Array.isArray(project.scenarioFields)) project.scenarioFields = [];
@@ -1820,6 +1866,13 @@
         return '<th class="es-excel-colhead">' + dLetter + '</th><th class="es-excel-colhead">' + mLetter + '</th>';
       }).join('') + '</tr>';
 
+    // colgroup 精确控宽（table-layout:fixed 下列标行与数据行严格对齐）：
+    // 行号 2.2rem / 场景 11rem / 电流 5.5rem / 每个时长·耗电列各 6+6.5rem
+    // fixed 布局下表格须显式宽度 col 宽度才生效，总宽经 CSS 变量按列数计算（手机端在媒体查询中重算）
+    const colGroup = '<colgroup><col class="es-col-rownum" /><col class="es-col-scenario" /><col class="es-col-current" />'
+      + model.columns.map(() => '<col class="es-col-duration" /><col class="es-col-mah" />').join('')
+      + '</colgroup>';
+
     // 两行表头
     const headTop = '<th class="es-corner es-excel-rowhead" rowspan="3"></th><th class="es-corner" rowspan="3">场景</th><th rowspan="3">电流 mA</th>'
       + model.columns.map((col, ci) => {
@@ -1860,7 +1913,7 @@
           + '</td>';
         return dInput + formulaCellHtml(ev, model, mDesc);
       }).join('');
-      return '<tr data-es-model-row="' + escapeHtml(row.id) + '"><th class="es-excel-rownum">' + E.rowNumberFor(rowIndex) + '</th><td class="es-sc-name">' + escapeHtml(scenarioName) + '</td>'
+      return '<tr data-es-model-row="' + escapeHtml(row.id) + '"><th class="es-excel-rownum">' + E.rowNumberFor(rowIndex) + '</th><td class="es-sc-name" title="' + escapeHtml(scenarioName) + '">' + escapeHtml(scenarioName) + '</td>'
         + '<td class="es-current-cell">' + (current === null ? '—' : fmt(current, 2)) + '</td>' + cells + '</tr>';
     }).join('');
 
@@ -1892,7 +1945,7 @@
       + '<button type="button" class="es-mini-btn" data-es-model-action="help"><span class="material-symbols-outlined">function</span>公式说明</button>'
       + '<button type="button" class="es-mini-btn es-mini-danger" data-es-model-action="delete-model"><span class="material-symbols-outlined">delete</span>删除模型</button>'
       + '</div>'
-      + '<div class="es-model-table-wrap"><table class="es-model-table es-excel-grid"><thead>' + colBar + '<tr>' + headTop + '</tr><tr>' + headSub + '</tr></thead>'
+      + '<div class="es-model-table-wrap"><table class="es-model-table es-excel-grid" style="--es-col-count:' + model.columns.length + '">' + colGroup + '<thead>' + colBar + '<tr>' + headTop + '</tr><tr>' + headSub + '</tr></thead>'
       + '<tbody>' + (body || '<tr><td colspan="' + (3 + model.columns.length * 2) + '" class="es-table-empty">请先在上方「场景电流」中新增场景，或点工具栏「新增场景行」</td></tr>') + '</tbody>'
       + '<tfoot>' + totals + '</tfoot></table></div>'
       + '<p class="es-model-tip"><span class="material-symbols-outlined">info</span>'

@@ -153,6 +153,20 @@
   padding: 1.4rem .8rem !important;
   font-size: .72rem;
 }
+.es-scenario-empty { padding: 1.6rem .8rem !important; }
+.es-scenario-empty .es-empty-msg {
+  margin-bottom: .8rem;
+  color: #64748b;
+  font-size: .72rem;
+  line-height: 1.7;
+}
+.es-scenario-empty .es-empty-actions {
+  display: flex;
+  justify-content: center;
+  gap: .6rem;
+  flex-wrap: wrap;
+}
+.es-scenario-empty .es-empty-actions .material-symbols-outlined { font-size: 1rem; }
 .es-sc-name { font-weight: 700; color: #1e293b; }
 .es-sc-name small {
   display: block;
@@ -378,16 +392,30 @@
 }
 
 /* ---------- 电池可放电容量查询表 ---------- */
-.es-discharge-card .es-discharge-tip {
+.es-discharge-tip {
   display: flex;
   align-items: flex-start;
   gap: .35rem;
   margin: .2rem 0 .65rem;
-  color: #94a3b8;
-  font-size: .66rem;
-  line-height: 1.6;
+  padding: .5rem .65rem;
+  border-radius: .55rem;
+  background: #f8faff;
+  border: 1px solid #e0e7ff;
+  color: #64748b;
+  font-family: 'Noto Sans SC', system-ui, sans-serif;
+  font-size: .68rem;
+  font-weight: 500;
+  line-height: 1.7;
 }
-.es-discharge-card .es-discharge-tip b { color: #6366f1; font-weight: 800; }
+.es-discharge-tip::before {
+  content: 'info';
+  font-family: 'Material Symbols Outlined';
+  font-size: .95rem;
+  color: #818cf8;
+  flex: none;
+  margin-top: .05rem;
+}
+.es-discharge-tip b { color: #4f46e5; font-weight: 800; }
 .es-discharge-table { min-width: 460px; }
 .es-discharge-table th { white-space: nowrap; }
 .es-dt-input {
@@ -902,17 +930,27 @@ select.es-modal-input { cursor: pointer; }
   background: #fff;
 }
 .es-excel-grid {
-  width: 100%;
-  min-width: 760px;
+  /* 宽度按列数计算：固定 18.7rem（行号+场景+电流）+ 每对比列 12.5rem；
+     fixed 布局要求显式宽度 col 宽度才会生效，宽屏下 min-width 保证撑满容器 */
+  width: calc(18.7rem + 12.5rem * var(--es-col-count, 3));
+  min-width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   border-spacing: 0;
   font-size: .7rem;
 }
+/* colgroup 固定列宽，列标行与数据行严格对齐 */
+.es-excel-grid .es-col-rownum { width: 2.2rem; }
+.es-excel-grid .es-col-scenario { width: 11rem; }
+.es-excel-grid .es-col-current { width: 5.5rem; }
+.es-excel-grid .es-col-duration { width: 6rem; }
+.es-excel-grid .es-col-mah { width: 6.5rem; }
 .es-excel-grid th,
 .es-excel-grid td {
   border: 1px solid #d4d4d4 !important;
   padding: .22rem .3rem;
   vertical-align: middle;
+  overflow: hidden;
 }
 
 /* 列标行 / 行号列：Excel 经典灰 */
@@ -929,15 +967,12 @@ select.es-modal-input { cursor: pointer; }
   padding: .15rem .25rem;
 }
 .es-excel-rownum {
-  width: 2.3rem;
-  min-width: 2.3rem;
   position: sticky;
   left: 0;
   z-index: 2;
 }
 tbody .es-excel-rownum { background: #f8f8f8; }
 .es-excel-noaddr { color: #bbb; }
-.es-excel-colbar .es-excel-colhead { min-width: 3.4rem; }
 
 /* 模式表头（典型使用等）收敛为 Excel 浅灰表头 */
 .es-excel-grid thead .es-mode-head,
@@ -956,12 +991,16 @@ tbody .es-excel-rownum { background: #f8f8f8; }
   font-weight: 800;
   color: #1e293b;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .es-excel-grid .es-current-cell {
   text-align: center;
   font-weight: 800;
   color: #4338ca;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 行悬停：Excel 式浅蓝 */
@@ -978,11 +1017,11 @@ tbody .es-excel-rownum { background: #f8f8f8; }
 }
 .es-excel-grid .es-duration-input {
   width: 100%;
-  min-width: 4.6rem;
+  min-width: 0;
   border: 1px solid transparent;
   border-radius: 0;
-  padding: .28rem .35rem;
-  font-size: .7rem;
+  padding: .28rem .2rem;
+  font-size: .68rem;
   font-weight: 700;
   color: #1e293b;
   background: transparent;
@@ -1030,6 +1069,15 @@ tbody .es-excel-rownum { background: #f8f8f8; }
 .es-excel-grid tfoot .es-stat-auto td { color: #475569; }
 
 @media (max-width: 640px) {
-  .es-excel-grid { font-size: .66rem; }
-  .es-excel-rownum { width: 1.8rem; min-width: 1.8rem; }
+  .es-excel-grid {
+    font-size: .66rem;
+    /* 手机端收窄：1.8+8+4.5=14.3rem 固定部分 + 每对比列 4.8+5.2=10rem */
+    width: calc(14.3rem + 10rem * var(--es-col-count, 3));
+  }
+  .es-excel-grid .es-col-rownum { width: 1.8rem; }
+  .es-excel-grid .es-col-scenario { width: 8rem; }
+  .es-excel-grid .es-col-current { width: 4.5rem; }
+  .es-excel-grid .es-col-duration { width: 4.8rem; }
+  .es-excel-grid .es-col-mah { width: 5.2rem; }
+  .es-excel-grid .es-duration-input { padding: .24rem .12rem; }
 }
