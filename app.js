@@ -253,7 +253,7 @@ function clearTransientCaches() {
       'device_power_db_data_v1',
       // 配置文件生成的四项参数（项目名 / 采集卡位号 / 平台 / DAB），刷新后要能复现
       'qepm_config_gen_options_v1',
-      // 续航/功耗现状：项目、电池参数、场景电流台账与自定义续航模型
+      // 续航/功耗现状：项目、电池参数、场景电流台账与 DOU 续航模型
       'endurance_status_v1',
     ]);
     const keepValues = {};

@@ -312,7 +312,9 @@
         localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data));
       } catch (error) {
         console.warn('续航现状数据保存失败（可能超出浏览器存储上限）', error);
-        alert('保存失败：浏览器存储空间可能已满，请删除部分项目或历史记录后重试。');
+        if (window.ES_MODAL) {
+          window.ES_MODAL.alert({ title: '保存失败', icon: 'error', message: '浏览器存储空间可能已满，请删除部分项目或历史记录后重试。' });
+        }
       }
     },
     activeProject() {
@@ -613,6 +615,228 @@
 })();
 
 /* ================================================================
+ * 公共模态框 ES_MODAL：屏幕居中的美化弹窗，替代浏览器原生 prompt/confirm/alert。
+ * 全部 Promise 化：prompt 返回 string|null、confirm 返回 boolean、
+ * alert 关闭后 resolve、form 返回字段对象|null（取消）。
+ * ================================================================ */
+(function () {
+  'use strict';
+  const E = window.ES_ENDURANCE;
+  const { escapeHtml } = E;
+  let activeOverlay = null;
+
+  function closeActive() {
+    if (!activeOverlay) return;
+    const overlay = activeOverlay;
+    const previous = overlay._previousFocus || null;
+    if (typeof overlay._reject === 'function') overlay._reject();
+    if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    activeOverlay = null;
+    document.removeEventListener('keydown', onKeydown, true);
+    document.body.classList.remove('es-modal-open');
+    if (previous && typeof previous.focus === 'function') {
+      try { previous.focus({ preventScroll: true }); } catch (err) { previous.focus(); }
+    }
+  }
+  function onKeydown(event) {
+    if (!activeOverlay) return;
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      activeOverlay._reject(null);
+      return;
+    }
+    // 简单焦点陷阱：Tab 在弹窗内循环
+    if (event.key === 'Tab') {
+      const focusables = activeOverlay.querySelectorAll('input, select, textarea, button:not([disabled])');
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  }
+
+  function openModal({ title, icon, bodyHtml, confirmText, cancelText, danger, onMount, onSubmit, hideCancel }) {
+    return new Promise((resolve) => {
+      // 先关闭并 resolve 旧弹窗，避免旧 Promise 永久挂起
+      closeActive();
+      const previousFocus = document.activeElement;
+      const overlay = document.createElement('div');
+      overlay.className = 'es-modal-overlay';
+      overlay.innerHTML = '<div class="es-modal-dialog panel rounded-3xl" role="dialog" aria-modal="true">'
+        + '<div class="es-modal-head"><h4><span class="material-symbols-outlined">' + escapeHtml(icon || 'edit_note') + '</span>'
+        + escapeHtml(title || '') + '</h4>'
+        + '<button type="button" class="es-icon-btn es-modal-close" title="关闭（Esc）"><span class="material-symbols-outlined">close</span></button></div>'
+        + '<div class="es-modal-body">' + bodyHtml + '</div>'
+        + '<p class="es-modal-error" hidden></p>'
+        + '<div class="es-modal-foot">'
+        + (hideCancel ? '' : '<button type="button" class="template-btn es-modal-cancel">' + escapeHtml(cancelText || '取消') + '</button>')
+        + '<button type="button" class="template-btn es-modal-btn ' + (danger ? 'es-modal-confirm-danger' : 'es-modal-confirm-primary') + ' es-modal-confirm">'
+        + escapeHtml(confirmText || '确定') + '</button>'
+        + '</div></div>';
+      let settled = false;
+      overlay._previousFocus = previousFocus;
+      overlay._reject = () => {
+        if (settled) return;
+        settled = true;
+        if (activeOverlay === overlay) {
+          activeOverlay = null;
+          document.removeEventListener('keydown', onKeydown, true);
+          document.body.classList.remove('es-modal-open');
+          if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+          if (previousFocus && typeof previousFocus.focus === 'function') {
+            try { previousFocus.focus({ preventScroll: true }); } catch (err) { previousFocus.focus(); }
+          }
+        }
+        resolve(null);
+      };
+
+      const showError = (msg) => {
+        const errEl = overlay.querySelector('.es-modal-error');
+        if (!msg) { errEl.hidden = true; errEl.textContent = ''; return; }
+        errEl.hidden = false;
+        errEl.textContent = msg;
+      };
+      const done = (value) => {
+        if (settled) return;
+        settled = true;
+        if (activeOverlay === overlay) {
+          activeOverlay = null;
+          document.removeEventListener('keydown', onKeydown, true);
+          document.body.classList.remove('es-modal-open');
+          if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+          if (previousFocus && typeof previousFocus.focus === 'function') {
+            try { previousFocus.focus({ preventScroll: true }); } catch (err) { previousFocus.focus(); }
+          }
+        }
+        resolve(value);
+      };
+
+      overlay.querySelector('.es-modal-close').addEventListener('click', () => overlay._reject());
+      const cancelBtn = overlay.querySelector('.es-modal-cancel');
+      if (cancelBtn) cancelBtn.addEventListener('click', () => overlay._reject());
+      overlay.addEventListener('mousedown', (event) => { if (event.target === overlay) overlay._reject(); });
+      document.addEventListener('keydown', onKeydown, true);
+
+      activeOverlay = overlay;
+      document.body.classList.add('es-modal-open');
+      document.body.appendChild(overlay);
+      const ctx = { overlay, showError, done, close: () => overlay._reject() };
+      if (onMount) onMount(ctx);
+      overlay.querySelector('.es-modal-confirm').addEventListener('click', () => onSubmit(ctx));
+      const firstInput = overlay.querySelector('input, select, textarea');
+      if (firstInput) {
+        firstInput.focus();
+        if (typeof firstInput.select === 'function' && firstInput.type !== 'date') firstInput.select();
+      } else {
+        overlay.querySelector('.es-modal-confirm').focus();
+      }
+    });
+  }
+
+  function fieldHtml(f) {
+    const val = f.value === null || f.value === undefined ? '' : f.value;
+    const common = ' class="es-modal-input" autocomplete="off"'
+      + (f.placeholder ? ' placeholder="' + escapeHtml(f.placeholder) + '"' : '')
+      + (f.inputmode ? ' inputmode="' + escapeHtml(f.inputmode) + '"' : '');
+    let control;
+    if (f.type === 'select') {
+      control = '<select' + common + '>' + f.options.map((o) => {
+        const ov = typeof o === 'object' ? o.value : o;
+        const ol = typeof o === 'object' ? o.label : o;
+        return '<option value="' + escapeHtml(ov) + '"' + (String(ov) === String(val) ? ' selected' : '') + '>' + escapeHtml(ol) + '</option>';
+      }).join('') + '</select>';
+    } else if (f.type === 'textarea') {
+      control = '<textarea rows="3"' + common + '>' + escapeHtml(val) + '</textarea>';
+    } else {
+      control = '<input type="' + escapeHtml(f.type || 'text') + '"' + common + ' value="' + escapeHtml(val) + '" />';
+    }
+    return '<label class="es-modal-field"><span>' + escapeHtml(f.label) + '</span>' + control + '</label>';
+  }
+
+  const ES_MODAL = {
+    prompt(opts) {
+      const f = {
+        key: 'value', label: opts.label || '名称', value: opts.value || '',
+        placeholder: opts.placeholder || '', type: opts.type || 'text', inputmode: opts.inputmode,
+      };
+      return openModal({
+        title: opts.title, icon: opts.icon,
+        confirmText: opts.confirmText, cancelText: opts.cancelText, danger: opts.danger,
+        bodyHtml: fieldHtml(f),
+        onMount: (ctx) => {
+          const input = ctx.overlay.querySelector('.es-modal-input');
+          input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); ctx.overlay.querySelector('.es-modal-confirm').click(); } });
+        },
+        onSubmit: (ctx) => {
+          const raw = ctx.overlay.querySelector('.es-modal-input').value;
+          if (opts.validate) {
+            const msg = opts.validate(raw);
+            if (msg) { ctx.showError(msg); return; }
+          }
+          ctx.done(raw);
+        },
+      });
+    },
+    confirm(opts) {
+      return openModal({
+        title: opts.title || '请确认', icon: opts.icon || 'help', danger: true,
+        confirmText: opts.confirmText || '确认删除', cancelText: opts.cancelText || '取消',
+        bodyHtml: '<p class="es-modal-message">' + escapeHtml(opts.message || '').replace(/\n/g, '<br>') + '</p>',
+        onSubmit: (ctx) => ctx.done(true),
+      }).then((v) => v === true);
+    },
+    alert(opts) {
+      const body = opts.html
+        ? '<div class="es-modal-message es-modal-html">' + opts.html + '</div>'
+        : '<p class="es-modal-message">' + escapeHtml(opts.message || '').replace(/\n/g, '<br>') + '</p>';
+      return openModal({
+        title: opts.title || '提示', icon: opts.icon || 'info', hideCancel: true,
+        confirmText: opts.confirmText || '我知道了',
+        bodyHtml: body,
+        onSubmit: (ctx) => ctx.done(true),
+      }).then(() => undefined);
+    },
+    form(opts) {
+      const fields = opts.fields || [];
+      return openModal({
+        title: opts.title, icon: opts.icon,
+        confirmText: opts.confirmText, cancelText: opts.cancelText, danger: opts.danger,
+        bodyHtml: fields.map(fieldHtml).join(''),
+        onMount: (ctx) => {
+          ctx.overlay.querySelectorAll('.es-modal-input').forEach((input) => {
+            input.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter' && input.tagName !== 'TEXTAREA') {
+                event.preventDefault();
+                ctx.overlay.querySelector('.es-modal-confirm').click();
+              }
+            });
+          });
+          if (opts.onMount) opts.onMount(ctx);
+        },
+        onSubmit: (ctx) => {
+          const values = {};
+          fields.forEach((f, i) => {
+            values[f.key] = ctx.overlay.querySelectorAll('.es-modal-input')[i].value;
+          });
+          if (opts.validate) {
+            const msg = opts.validate(values);
+            if (msg) { ctx.showError(msg); return; }
+          }
+          ctx.done(values);
+        },
+      });
+    },
+  };
+  window.ES_MODAL = ES_MODAL;
+})();
+
+/* ================================================================
  * 第二部分：页面骨架、项目管理、电池参数、可放电容量查询表
  * ================================================================ */
 (function () {
@@ -645,7 +869,7 @@
     return '<div class="panel rounded-3xl es-empty">'
       + '<span class="material-symbols-outlined es-empty-icon">battery_saver</span>'
       + '<h3>还没有项目</h3>'
-      + '<p>新增一个项目后即可维护电池参数、场景电流与自定义续航模型，并进行多项目横向对比。</p>'
+      + '<p>新增一个项目后即可维护电池参数、场景电流与 DOU 续航模型，并进行多项目横向对比。</p>'
       + '<button type="button" class="template-btn template-btn-primary es-add-project-btn">'
       + '<span class="material-symbols-outlined text-sm">add</span>新增第一个项目</button>'
       + '</div>';
@@ -677,31 +901,39 @@
       });
     });
     root.querySelectorAll('.es-add-project-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const name = window.prompt('请输入新项目名称：', '新项目 ' + (data.projects.length + 1));
+      btn.addEventListener('click', async () => {
+        const name = await window.ES_MODAL.prompt({
+          title: '新建项目', icon: 'create_new_folder', label: '项目名称',
+          value: '新项目 ' + (data.projects.length + 1),
+          validate: (v) => (v.trim() ? null : '项目名称不能为空'),
+        });
         if (name === null) return;
-        const trimmed = name.trim();
-        if (!trimmed) { alert('项目名称不能为空'); return; }
-        E.store.addProject(trimmed);
+        E.store.addProject(name.trim());
         render();
       });
     });
     const renameBtn = root.querySelector('.es-rename-project-btn');
     if (renameBtn && project) {
-      renameBtn.addEventListener('click', () => {
-        const name = window.prompt('修改项目名称：', project.name);
+      renameBtn.addEventListener('click', async () => {
+        const name = await window.ES_MODAL.prompt({
+          title: '重命名项目', icon: 'drive_file_rename_outline', label: '项目名称',
+          value: project.name,
+          validate: (v) => (v.trim() ? null : '项目名称不能为空'),
+        });
         if (name === null) return;
-        const trimmed = name.trim();
-        if (!trimmed) { alert('项目名称不能为空'); return; }
-        project.name = trimmed;
+        project.name = name.trim();
         E.store.save();
         render();
       });
     }
     const deleteBtn = root.querySelector('.es-delete-project-btn');
     if (deleteBtn && project) {
-      deleteBtn.addEventListener('click', () => {
-        if (!window.confirm('确认删除项目「' + project.name + '」？\n该项目下的电池参数、场景电流与全部续航模型都会被删除，且不可恢复。')) return;
+      deleteBtn.addEventListener('click', async () => {
+        const ok = await window.ES_MODAL.confirm({
+          title: '删除项目', icon: 'delete',
+          message: '确认删除项目「' + project.name + '」？\n该项目下的电池参数、场景电流与全部续航模型都会被删除，且不可恢复。',
+        });
+        if (!ok) return;
         E.store.removeProject(project.id);
         render();
       });
@@ -712,7 +944,6 @@
   function renderBoard(project) {
     return '<div class="es-board">'
       + renderBatteryCard(project)
-      + renderDischargeCard(project)
       + window.ES_ENDURANCE_SCENARIO.renderScenarioCard(project)
       + window.ES_ENDURANCE_MODEL.renderModelCard(project)
       + window.ES_ENDURANCE_UI.renderCompareCard(project)
@@ -751,6 +982,7 @@
       + '<div class="es-battery-grid">' + fields + '</div>'
       + '<p class="es-battery-derate">可用容量（公式名「可用容量」= Typ × 可放电比例）= <b>' + fmt(available, 2)
       + ' mAh</b>；综合可用电量系数 = 可放电比例 × (1 − 低电量门限) = <b>' + fmt(derate, 4) + '</b></p>'
+      + renderDischargeCard(project)
       + '</section>';
   }
 
@@ -906,20 +1138,20 @@
         + '</tr>';
     }).join('') : '<tr><td colspan="4" class="es-table-empty">暂无数据，导入文档或手动新增电压 - 容量点</td></tr>';
     const derived = E.deriveDischargeRatio(project);
-    return '<section class="panel rounded-3xl es-card es-discharge-card">'
-      + '<header class="es-card-head"><h3><span class="material-symbols-outlined">table_chart</span>电池可放电容量查询表</h3>'
+    return '<div class="es-submodule es-discharge-sub">'
+      + '<div class="es-submodule-head"><h4><span class="material-symbols-outlined">table_chart</span>电池可放电容量查询表</h4>'
       + '<div class="es-head-actions">'
       + '<button type="button" class="template-btn template-btn-sm" data-es-dt-import><span class="material-symbols-outlined text-sm">upload_file</span>导入文档自动识别</button>'
       + '<input type="file" accept=".xlsx,.xls,.csv" hidden data-es-dt-file />'
       + '<button type="button" class="template-btn template-btn-sm" data-es-dt-add><span class="material-symbols-outlined text-sm">add</span>新增一行</button>'
       + '<button type="button" class="template-btn template-btn-sm template-btn-danger" data-es-dt-clear><span class="material-symbols-outlined text-sm">delete_sweep</span>清空</button>'
-      + '</div></header>'
+      + '</div></div>'
       + '<p class="es-discharge-tip">容量列指电池从满电放电至该电压时<b>累计可放出的容量（mAh）</b>；导入「剩余容量 / SOC」类表格时会自动按 Typ 容量换算，支持 .xlsx / .xls / .csv。</p>'
       + '<div class="es-table-wrap"><table class="es-table es-discharge-table"><thead><tr>'
       + '<th>电压 V</th><th>可放电容量 mAh</th><th>占 Typ 比例</th><th style="width:64px">操作</th>'
       + '</tr></thead><tbody>' + body + '</tbody></table></div>'
       + '<p class="es-discharge-sync">' + dischargeSyncHint(project, derived.reason, derived.ok ? derived : null) + '</p>'
-      + '</section>';
+      + '</div>';
   }
 
   function bindDischargeCard(project) {
@@ -937,10 +1169,16 @@
         b.dischargeTable = parsed.rows.map((r) => ({ id: uid('dt'), voltage: r.voltage, capacityMah: r.capacityMah }));
         E.store.save();
         render();
-        window.alert('识别成功：从「' + parsed.sheetName + '」导入 ' + parsed.rows.length + ' 个电压点。\n' + parsed.note);
+        await window.ES_MODAL.alert({
+          title: '导入成功', icon: 'check_circle',
+          message: '从「' + parsed.sheetName + '」导入 ' + parsed.rows.length + ' 个电压点。\n' + parsed.note,
+        });
         syncRatioFromTable();
       } catch (error) {
-        window.alert('导入失败：' + (error && error.message ? error.message : '无法识别文件内容'));
+        await window.ES_MODAL.alert({
+          title: '导入失败', icon: 'error',
+          message: error && error.message ? error.message : '无法识别文件内容',
+        });
       }
     });
 
@@ -949,9 +1187,14 @@
       E.store.save();
       render();
     });
-    root.querySelector('[data-es-dt-clear]').addEventListener('click', () => {
+    root.querySelector('[data-es-dt-clear]').addEventListener('click', async () => {
       if (!b.dischargeTable.length) return;
-      if (!window.confirm('确认清空电池可放电容量查询表？')) return;
+      const ok = await window.ES_MODAL.confirm({
+        title: '清空查询表', icon: 'delete_sweep',
+        message: '确认清空电池可放电容量查询表？',
+        confirmText: '清空',
+      });
+      if (!ok) return;
       b.dischargeTable = [];
       E.store.save();
       render();
@@ -1115,12 +1358,8 @@
 (function () {
   'use strict';
   const E = window.ES_ENDURANCE;
-  const { escapeHtml, uid, num, fmt, todayStr, debounce } = E;
+  const { escapeHtml, uid, num, fmt, todayStr } = E;
   const root = document.getElementById('enduranceStatusRoot');
-
-  const refreshModelsQuiet = debounce(function () {
-    window.ES_ENDURANCE_UI.refreshModelAndCompare && window.ES_ENDURANCE_UI.refreshModelAndCompare();
-  }, 200);
 
   function renderScenarioCard(project) {
     const customFields = project.scenarioFields || [];
@@ -1134,12 +1373,17 @@
       const custom = num(scenario.customCurrent);
       const isCustom = custom !== null;
       const current = isCustom ? custom : (rec ? num(rec.current) : null);
+      const currentText = current === null ? '' : String(current);
+      const versionText = rec && rec.version ? String(rec.version) : '';
+      const dateText = rec && rec.date ? String(rec.date) : '';
       const currentCell = '<td class="es-sc-current">'
-        + (current === null ? '—' : fmt(current, 3) + ' mA')
-        + (isCustom ? '<em class="es-custom-chip" title="自定义电流，不来自测试记录">自定义</em>' : '')
-        + '<button type="button" class="es-icon-btn es-inline-edit" data-es-action="custom-current" title="设置 / 清除自定义电流"><span class="material-symbols-outlined">edit</span></button>'
-        + (isCustom ? '<button type="button" class="es-icon-btn es-inline-clear" data-es-action="clear-custom" title="清除自定义，恢复测试记录电流"><span class="material-symbols-outlined">restart_alt</span></button>' : '')
-        + '</td>';
+        + '<div class="es-inline-input-wrap">'
+        + '<input type="text" inputmode="decimal" class="es-field-input es-current-input" data-es-current="' + escapeHtml(scenario.id) + '"'
+        + ' data-es-current-orig="' + escapeHtml(isCustom ? currentText : '') + '"'
+        + ' value="' + escapeHtml(currentText) + '" placeholder="自定义电流 mA" autocomplete="off" />'
+        + (isCustom ? '<em class="es-custom-chip" title="自定义电流，不来自测试记录">自定义</em>'
+          + '<button type="button" class="es-icon-btn es-inline-clear" data-es-action="clear-custom" title="清除自定义，恢复测试记录电流"><span class="material-symbols-outlined">restart_alt</span></button>' : '')
+        + '</div></td>';
       const customCells = customFields.map((f) => '<td><input type="text" class="es-field-input" data-es-field-row="' + escapeHtml(scenario.id)
         + '" data-es-field-col="' + escapeHtml(f.id) + '" value="' + escapeHtml(scenario.fields && scenario.fields[f.id] || '') + '" autocomplete="off" /></td>').join('');
       return '<tr data-es-scenario="' + escapeHtml(scenario.id) + '">'
@@ -1148,8 +1392,12 @@
         + '<td><input type="text" class="es-field-input es-standard-input" data-es-standard="' + escapeHtml(scenario.id)
         + '" value="' + escapeHtml(scenario.standard || '') + '" placeholder="功耗标准 / 门限" autocomplete="off" /></td>'
         + currentCell
-        + '<td class="es-sc-version">' + (rec ? escapeHtml(rec.version || '—') : '—') + '</td>'
-        + '<td class="es-sc-date">' + (rec ? escapeHtml(rec.date || '—') : '暂无数据') + '</td>'
+        + '<td><input type="text" class="es-field-input es-version-input" data-es-version="' + escapeHtml(scenario.id)
+        + '" data-es-version-orig="' + escapeHtml(versionText)
+        + '" value="' + escapeHtml(versionText) + '" placeholder="测试版本" autocomplete="off" /></td>'
+        + '<td><input type="text" class="es-field-input es-date-input" data-es-date="' + escapeHtml(scenario.id)
+        + '" data-es-date-orig="' + escapeHtml(dateText)
+        + '" value="' + escapeHtml(dateText) + '" placeholder="YYYY-MM-DD" autocomplete="off" /></td>'
         + '<td><input type="text" class="es-field-input es-remark-input" data-es-remark="' + escapeHtml(scenario.id)
         + '" value="' + escapeHtml(scenario.remark || '') + '" placeholder="备注 / 说明" autocomplete="off" /></td>'
         + customCells
@@ -1172,28 +1420,48 @@
       + '</tbody></table></div></section>';
   }
 
+  function isValidDateText(text) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+    const y = Number(text.slice(0, 4));
+    const m = Number(text.slice(5, 7));
+    const d = Number(text.slice(8, 10));
+    if (m < 1 || m > 12 || d < 1) return false;
+    const dt = new Date(y, m - 1, d);
+    return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+  }
+
   function bindScenarios(project) {
     const addBtn = root.querySelector('.es-add-scenario-btn');
     if (addBtn) addBtn.addEventListener('click', () => openScenarioEditor(project, null));
 
-    root.querySelector('[data-es-add-field]').addEventListener('click', () => {
-      const name = window.prompt('新列名称（如：功耗来源、测试人）：', '');
-      if (name === null) return;
-      const trimmed = name.trim();
-      if (!trimmed) { alert('列名不能为空'); return; }
+    root.querySelector('[data-es-add-field]').addEventListener('click', async () => {
       if (!Array.isArray(project.scenarioFields)) project.scenarioFields = [];
-      if (project.scenarioFields.some((f) => f.name === trimmed)) { alert('已存在同名列'); return; }
-      project.scenarioFields.push({ id: uid('sf'), name: trimmed });
+      const name = await window.ES_MODAL.prompt({
+        title: '新增自定义列', icon: 'view_column', label: '列名称',
+        placeholder: '如：功耗来源、测试人', confirmText: '新增列',
+        validate: (raw) => {
+          const trimmed = (raw || '').trim();
+          if (!trimmed) return '列名不能为空';
+          if (project.scenarioFields.some((f) => f.name === trimmed)) return '已存在同名列';
+          return null;
+        },
+      });
+      if (name === null) return;
+      project.scenarioFields.push({ id: uid('sf'), name: name.trim() });
       E.store.save();
       window.ES_ENDURANCE_UI.render();
     });
 
     root.querySelectorAll('[data-es-field-delete]').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const fid = btn.dataset.esFieldDelete;
         const field = (project.scenarioFields || []).find((f) => f.id === fid);
         if (!field) return;
-        if (!window.confirm('确认删除列「' + field.name + '」？各场景在该列填写的内容会一并删除。')) return;
+        const ok = await window.ES_MODAL.confirm({
+          title: '删除自定义列', icon: 'delete',
+          message: '确认删除列「' + field.name + '」？各场景在该列填写的内容会一并删除。',
+        });
+        if (!ok) return;
         project.scenarioFields = project.scenarioFields.filter((f) => f.id !== fid);
         project.scenarios.forEach((s) => { if (s.fields) delete s.fields[fid]; });
         E.store.save();
@@ -1218,6 +1486,89 @@
         E.store.save();
       });
     });
+    // 当前电流：内联编辑自定义电流。
+    // 仅当值相对渲染时的原始值发生变化才写库，避免未编辑就把测试记录电流误转为自定义；
+    // 留空且原本是自定义时清除自定义并完整重绘，恢复测试记录值与「自定义」标记。
+    root.querySelectorAll('.es-current-input').forEach((input) => {
+      input.addEventListener('blur', () => {
+        const scenario = project.scenarios.find((s) => s.id === input.dataset.esCurrent);
+        if (!scenario) return;
+        const trimmed = input.value.trim();
+        const orig = input.dataset.esCurrentOrig || '';
+        if (trimmed === orig) { input.classList.remove('is-error'); return; }
+        if (trimmed === '') {
+          input.classList.remove('is-error');
+          if (scenario.customCurrent !== '') {
+            scenario.customCurrent = '';
+            E.store.save();
+            window.ES_ENDURANCE_UI.render();
+          }
+          return;
+        }
+        const v = num(trimmed);
+        if (v === null || v < 0) {
+          input.classList.add('is-error');
+          return;
+        }
+        input.classList.remove('is-error');
+        scenario.customCurrent = String(v);
+        E.store.save();
+        window.ES_ENDURANCE_UI.render();
+      });
+    });
+    // 测试版本 / 更新日期：内联编辑最新一条测试记录。
+    // 无记录且填写了内容才创建记录并立即落库；空值不产生空记录。
+    function upsertLatestRecord(scenario) {
+      let rec = E.latestRecord(scenario);
+      if (rec) return rec;
+      rec = {
+        id: uid('rec'),
+        date: E.todayStr(),
+        version: '',
+        current: E.scenarioCurrent(project, scenario.id) === null ? '' : String(E.scenarioCurrent(project, scenario.id)),
+        note: '',
+      };
+      scenario.records.push(rec);
+      E.store.save();
+      return rec;
+    }
+    root.querySelectorAll('.es-version-input').forEach((input) => {
+      input.addEventListener('blur', () => {
+        const scenario = project.scenarios.find((s) => s.id === input.dataset.esVersion);
+        if (!scenario) return;
+        const trimmed = input.value.trim();
+        if (trimmed === (input.dataset.esVersionOrig || '')) { input.classList.remove('is-error'); return; }
+        if (trimmed === '' && !E.latestRecord(scenario)) return;
+        const rec = upsertLatestRecord(scenario);
+        rec.version = trimmed;
+        E.store.save();
+        window.ES_ENDURANCE_UI.render();
+      });
+    });
+    root.querySelectorAll('.es-date-input').forEach((input) => {
+      input.addEventListener('blur', () => {
+        const scenario = project.scenarios.find((s) => s.id === input.dataset.esDate);
+        if (!scenario) return;
+        const trimmed = input.value.trim();
+        if (trimmed === (input.dataset.esDateOrig || '')) { input.classList.remove('is-error'); return; }
+        if (trimmed === '') {
+          input.classList.remove('is-error');
+          const rec0 = E.latestRecord(scenario);
+          if (rec0 && rec0.date) { rec0.date = ''; E.store.save(); window.ES_ENDURANCE_UI.render(); }
+          return;
+        }
+        if (!isValidDateText(trimmed)) {
+          input.classList.add('is-error');
+          return;
+        }
+        input.classList.remove('is-error');
+        const rec = upsertLatestRecord(scenario);
+        rec.date = trimmed;
+        scenario.records.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+        E.store.save();
+        window.ES_ENDURANCE_UI.render();
+      });
+    });
     root.querySelectorAll('.es-field-input[data-es-field-row]').forEach((input) => {
       input.addEventListener('blur', () => {
         const scenario = project.scenarios.find((s) => s.id === input.dataset.esFieldRow);
@@ -1237,7 +1588,6 @@
           if (action === 'update-current') openCurrentEditor(project, id);
           else if (action === 'history') openHistory(project, id);
           else if (action === 'rename-scenario') openScenarioEditor(project, project.scenarios.find((s) => s.id === id));
-          else if (action === 'custom-current') openCustomCurrent(project, id);
           else if (action === 'clear-custom') clearCustomCurrent(project, id);
           else if (action === 'delete-scenario') deleteScenario(project, id);
         });
@@ -1245,10 +1595,14 @@
     });
   }
 
-  function deleteScenario(project, id) {
+  async function deleteScenario(project, id) {
     const scenario = project.scenarios.find((s) => s.id === id);
     if (!scenario) return;
-    if (!window.confirm('确认删除场景「' + scenario.name + '」及其全部电流记录？续航模型中引用该场景的行会一并删除。')) return;
+    const ok = await window.ES_MODAL.confirm({
+      title: '删除场景', icon: 'delete',
+      message: '确认删除场景「' + scenario.name + '」及其全部电流记录？续航模型中引用该场景的行会一并删除。',
+    });
+    if (!ok) return;
     project.scenarios = project.scenarios.filter((s) => s.id !== id);
     project.models.forEach((model) => {
       model.rows = model.rows.filter((r) => r.scenarioId !== id);
@@ -1258,11 +1612,18 @@
   }
 
   // 新增 / 重命名场景；新增时同步给该项目每个模型加一行
-  function openScenarioEditor(project, scenario) {
-    const name = window.prompt(scenario ? '修改场景名称：' : '请输入新场景名称：', scenario ? scenario.name : '');
+  async function openScenarioEditor(project, scenario) {
+    const name = await window.ES_MODAL.prompt({
+      title: scenario ? '重命名场景' : '新增场景',
+      icon: scenario ? 'drive_file_rename_outline' : 'add',
+      label: '场景名称',
+      value: scenario ? scenario.name : '',
+      placeholder: scenario ? '' : '请输入场景名称',
+      confirmText: scenario ? '保存' : '新增',
+      validate: (raw) => ((raw || '').trim() ? null : '场景名称不能为空'),
+    });
     if (name === null) return;
     const trimmed = name.trim();
-    if (!trimmed) { alert('场景名称不能为空'); return; }
     if (scenario) {
       scenario.name = trimmed;
     } else {
@@ -1281,28 +1642,6 @@
     window.ES_ENDURANCE_UI.render();
   }
 
-  // 自定义电流：不进入测试历史，直接覆盖生效值；留空则清除自定义
-  function openCustomCurrent(project, scenarioId) {
-    const scenario = project.scenarios.find((s) => s.id === scenarioId);
-    if (!scenario) return;
-    const text = window.prompt(
-      '为「' + scenario.name + '」设置自定义电流（mA）：\n'
-      + '自定义电流会直接覆盖测试记录用于公式计算，但不会进入历史记录。\n'
-      + '清空输入并确定，可恢复为最新测试记录电流。',
-      scenario.customCurrent === undefined || scenario.customCurrent === null ? '' : String(scenario.customCurrent),
-    );
-    if (text === null) return;
-    const trimmed = text.trim();
-    if (trimmed === '') { scenario.customCurrent = ''; }
-    else {
-      const v = num(trimmed);
-      if (v === null || v < 0) { alert('电流需为不小于 0 的数字'); return; }
-      scenario.customCurrent = String(v);
-    }
-    E.store.save();
-    window.ES_ENDURANCE_UI.render();
-  }
-
   function clearCustomCurrent(project, scenarioId) {
     const scenario = project.scenarios.find((s) => s.id === scenarioId);
     if (!scenario) return;
@@ -1311,45 +1650,63 @@
     window.ES_ENDURANCE_UI.render();
   }
 
-  // 电流更新弹窗：日期 / 版本 / 电流 / 备注，确认后追加一条记录（历史不覆盖）
-  function openCurrentEditor(project, scenarioId) {
+  // 电流更新弹窗：一个表单同时录入日期 / 版本 / 电流 / 备注，确认后追加一条记录（历史不覆盖）
+  async function openCurrentEditor(project, scenarioId) {
     const scenario = project.scenarios.find((s) => s.id === scenarioId);
     if (!scenario) return;
     const last = E.latestRecord(scenario);
-    const date = window.prompt('更新日期（YYYY-MM-DD）：', last ? last.date : todayStr());
-    if (date === null) return;
-    const dateTrim = date.trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateTrim)) { alert('日期格式应为 YYYY-MM-DD'); return; }
-    const version = window.prompt('测试版本号：', last ? (last.version || '') : '');
-    if (version === null) return;
-    const currentText = window.prompt('场景电流（mA）：', last ? String(last.current) : '');
-    if (currentText === null) return;
-    const current = num(currentText);
-    if (current === null || current < 0) { alert('电流需为不小于 0 的数字'); return; }
-    const note = window.prompt('备注 / 说明（可留空）：', last ? (last.note || '') : '');
-    if (note === null) return;
+    const values = await window.ES_MODAL.form({
+      title: '更新测试电流', icon: 'edit_note', confirmText: '追加记录',
+      fields: [
+        { key: 'date', label: '更新日期', value: last ? (last.date || '') : todayStr(), placeholder: 'YYYY-MM-DD' },
+        { key: 'version', label: '测试版本号', value: last ? (last.version || '') : '', placeholder: '如：EVT1' },
+        { key: 'current', label: '场景电流（mA）', value: last ? String(last.current) : '', placeholder: '不小于 0 的数字', inputmode: 'decimal' },
+        { key: 'note', label: '备注 / 说明（可留空）', type: 'textarea', value: last ? (last.note || '') : '' },
+      ],
+      validate: (v) => {
+        if (!isValidDateText((v.date || '').trim())) return '更新日期格式应为真实日期 YYYY-MM-DD';
+        const c = num(v.current);
+        if (c === null || c < 0) return '场景电流需为不小于 0 的数字';
+        return null;
+      },
+    });
+    if (values === null) return;
     scenario.records.push({
-      id: uid('rec'), date: dateTrim, version: version.trim(),
-      current: current, note: note.trim(),
+      id: uid('rec'), date: values.date.trim(), version: values.version.trim(),
+      current: num(values.current), note: values.note.trim(),
     });
     scenario.records.sort((a, b) => String(a.date).localeCompare(String(b.date)));
     E.store.save();
     window.ES_ENDURANCE_UI.render();
   }
 
-  // 历史记录查看
-  function openHistory(project, scenarioId) {
+  // 历史记录查看：居中弹窗 + 表格展示
+  async function openHistory(project, scenarioId) {
     const scenario = project.scenarios.find((s) => s.id === scenarioId);
-    if (!scenario || !scenario.records.length) { alert('该场景还没有测试电流记录'); return; }
-    const lines = scenario.records.slice().reverse().map((r, i) => {
-      const tag = i === 0 && num(scenario.customCurrent) === null ? '（当前生效）' : '';
-      return (r.date || '—') + ' | ' + (r.version || '未填版本') + ' | ' + fmt(num(r.current), 3) + ' mA'
-        + (r.note ? ' | ' + r.note : '') + tag;
-    });
-    const customLine = num(scenario.customCurrent) !== null
-      ? '当前生效为自定义电流 ' + fmt(num(scenario.customCurrent), 3) + ' mA（测试记录不参与计算）\n\n'
+    if (!scenario || !scenario.records.length) {
+      await window.ES_MODAL.alert({ title: '电流更新历史', icon: 'history', message: '该场景还没有测试电流记录' });
+      return;
+    }
+    const isCustom = num(scenario.customCurrent) !== null;
+    const customBanner = isCustom
+      ? '<p class="es-history-banner">当前生效为自定义电流 ' + fmt(num(scenario.customCurrent), 3)
+        + ' mA，测试记录暂不参与计算。</p>'
       : '';
-    window.alert('「' + scenario.name + '」电流更新历史（共 ' + scenario.records.length + ' 条）：\n' + customLine + '\n' + lines.join('\n'));
+    const rows = scenario.records.slice().reverse().map((r, i) => {
+      const activeTag = (i === 0 && !isCustom) ? '<em class="es-history-tag">当前生效</em>' : '';
+      return '<tr><td>' + escapeHtml(r.date || '—') + '</td>'
+        + '<td>' + escapeHtml(r.version || '未填版本') + '</td>'
+        + '<td class="es-history-num">' + escapeHtml(fmt(num(r.current), 3)) + ' mA</td>'
+        + '<td>' + escapeHtml(r.note || '') + activeTag + '</td></tr>';
+    }).join('');
+    const html = customBanner
+      + '<table class="es-modal-table es-history-table"><thead><tr><th>更新日期</th><th>测试版本</th><th>场景电流</th><th>备注</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody></table>'
+      + '<p class="es-modal-hint">共 ' + scenario.records.length + ' 条记录，按日期倒序排列</p>';
+    await window.ES_MODAL.alert({
+      title: '「' + scenario.name + '」电流更新历史',
+      icon: 'history', html: html, confirmText: '关闭',
+    });
   }
 
   window.ES_ENDURANCE_SCENARIO = { renderScenarioCard, bindScenarios };
@@ -1414,7 +1771,7 @@
     }).join('');
 
     return '<section class="panel rounded-3xl es-card es-model-card">'
-      + '<header class="es-card-head"><h3><span class="material-symbols-outlined">modeling</span>自定义续航模型</h3>'
+      + '<header class="es-card-head"><h3><span class="material-symbols-outlined">modeling</span>DOU续航模型</h3>'
       + '<div class="es-head-actions">'
       + '<button type="button" class="template-btn template-btn-sm" data-es-model-action="add"><span class="material-symbols-outlined text-sm">add</span>新建模型</button>'
       + '<button type="button" class="template-btn template-btn-sm" data-es-model-action="copy"><span class="material-symbols-outlined text-sm">content_copy</span>复制当前</button>'
@@ -1452,8 +1809,19 @@
   function renderModelBody(project, model) {
     const ev = E.evaluateModel(project, model);
 
+    // Excel 风格列标行：A=场景；电流展示列不占地址；对比列从 B/C 开始
+    const colBar = '<tr class="es-excel-colbar">'
+      + '<th class="es-excel-rowhead"></th>'
+      + '<th class="es-excel-colhead">A</th>'
+      + '<th class="es-excel-colhead es-excel-noaddr"></th>'
+      + model.columns.map((col, ci) => {
+        const dLetter = E.colLetterFor(ci, 'd');
+        const mLetter = E.colLetterFor(ci, 'm');
+        return '<th class="es-excel-colhead">' + dLetter + '</th><th class="es-excel-colhead">' + mLetter + '</th>';
+      }).join('') + '</tr>';
+
     // 两行表头
-    const headTop = '<th class="es-corner" rowspan="2">场景</th><th rowspan="2">电流 mA</th>'
+    const headTop = '<th class="es-corner es-excel-rowhead" rowspan="3"></th><th class="es-corner" rowspan="3">场景</th><th rowspan="3">电流 mA</th>'
       + model.columns.map((col, ci) => {
         const tag = col.kind === 'full' ? '<em class="es-mode-tag">满电</em>' : '';
         const win = col.window ? '<small>' + escapeHtml(col.window) + '</small>' : '';
@@ -1492,29 +1860,30 @@
           + '</td>';
         return dInput + formulaCellHtml(ev, model, mDesc);
       }).join('');
-      return '<tr data-es-model-row="' + escapeHtml(row.id) + '"><td class="es-sc-name">' + escapeHtml(scenarioName) + '</td>'
+      return '<tr data-es-model-row="' + escapeHtml(row.id) + '"><th class="es-excel-rownum">' + E.rowNumberFor(rowIndex) + '</th><td class="es-sc-name">' + escapeHtml(scenarioName) + '</td>'
         + '<td class="es-current-cell">' + (current === null ? '—' : fmt(current, 2)) + '</td>' + cells + '</tr>';
     }).join('');
 
     // tfoot：总时长/总耗电（可编辑公式）、平均电流（自动）、可使用时长 Typ/Min（可编辑公式）
     // 每个对比列含 时长 / 耗电 两个子格，严格与表体对齐
-    const totalRowHtml = '<tr class="es-stat-row"><td>Total（可编辑公式）</td><td></td>'
+    const totalRowHtml = '<tr class="es-stat-row"><th class="es-excel-rownum">' + E.totalRowNumber(model) + '</th><td>Total（可编辑公式）</td><td></td>'
       + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'td' }, 2)
         + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'tm' }, 2)).join('') + '</tr>';
 
-    const avgRow = '<tr class="es-stat-row es-stat-auto"><td>平均电流 mA（自动）</td><td></td>'
+    const avgRow = '<tr class="es-stat-row es-stat-auto"><th class="es-excel-rownum es-excel-noaddr"></th><td>平均电流 mA（自动）</td><td></td>'
       + model.columns.map((col) => {
         const s = ev.stats[col.id] || {};
         return '<td colspan="2" class="es-stat-mah">' + (s.avgCurrent === null ? '—' : fmt(s.avgCurrent, 2)) + '</td>';
       }).join('') + '</tr>';
 
-    const douRow = (label, cellType) => '<tr class="es-stat-row"><td>' + label + '</td><td></td>'
+    const douRow = (label, cellType, withRowNum) => '<tr class="es-stat-row"><th class="es-excel-rownum' + (withRowNum ? '' : ' es-excel-noaddr') + '">'
+      + (withRowNum ? E.douRowNumber(model) : '') + '</th><td>' + label + '</td><td></td>'
       + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: cellType }, 2)
         + '<td class="es-stat-blank"></td>').join('') + '</tr>';
 
     const totals = totalRowHtml + avgRow
-      + douRow('可使用时长（Typ）h', 'douTyp')
-      + douRow('可使用时长（Min）h', 'douMin');
+      + douRow('可使用时长（Typ）h', 'douTyp', true)
+      + douRow('可使用时长（Min）h', 'douMin', false);
 
     return '<div class="es-mode-toolbar">'
       + '<button type="button" class="es-mini-btn" data-es-model-action="add-row"><span class="material-symbols-outlined">playlist_add</span>新增场景行</button>'
@@ -1523,8 +1892,8 @@
       + '<button type="button" class="es-mini-btn" data-es-model-action="help"><span class="material-symbols-outlined">function</span>公式说明</button>'
       + '<button type="button" class="es-mini-btn es-mini-danger" data-es-model-action="delete-model"><span class="material-symbols-outlined">delete</span>删除模型</button>'
       + '</div>'
-      + '<div class="es-model-table-wrap"><table class="es-model-table"><thead><tr>' + headTop + '</tr><tr>' + headSub + '</tr></thead>'
-      + '<tbody>' + (body || '<tr><td colspan="' + (2 + model.columns.length * 2) + '" class="es-table-empty">请先在上方「场景电流」中新增场景，或点工具栏「新增场景行」</td></tr>') + '</tbody>'
+      + '<div class="es-model-table-wrap"><table class="es-model-table es-excel-grid"><thead>' + colBar + '<tr>' + headTop + '</tr><tr>' + headSub + '</tr></thead>'
+      + '<tbody>' + (body || '<tr><td colspan="' + (3 + model.columns.length * 2) + '" class="es-table-empty">请先在上方「场景电流」中新增场景，或点工具栏「新增场景行」</td></tr>') + '</tbody>'
       + '<tfoot>' + totals + '</tfoot></table></div>'
       + '<p class="es-model-tip"><span class="material-symbols-outlined">info</span>'
       + '默认口径对齐云表：场景耗电 = 时长 × 场景电流（0 时长自动得 0）；可使用时长 = 可用容量（Typ × 可放电比例，不硬编码）÷ 总耗电 × 总时长。'
@@ -1654,14 +2023,17 @@
   }
 
   // ---------- 模型 / 列 / 行管理 ----------
-  function handleModelAction(project, action) {
+  async function handleModelAction(project, action) {
     const model = activeModel(project);
     if (action === 'add') {
-      const name = window.prompt('新模型名称：', '续航模型 ' + (project.models.length + 1));
+      const name = await window.ES_MODAL.prompt({
+        title: '新建续航模型', icon: 'add_chart', label: '模型名称',
+        value: '续航模型 ' + (project.models.length + 1),
+        confirmText: '新建',
+        validate: (raw) => ((raw || '').trim() ? null : '模型名称不能为空'),
+      });
       if (name === null) return;
-      const trimmed = name.trim();
-      if (!trimmed) { alert('模型名称不能为空'); return; }
-      const created = E.createModelV2(project, trimmed, [{ name: '典型使用', kind: 'normal' }]);
+      const created = E.createModelV2(project, name.trim(), [{ name: '典型使用', kind: 'normal' }]);
       project.models.push(created);
       project.activeModelId = created.id;
       E.store.save();
@@ -1670,11 +2042,13 @@
     }
     if (action === 'copy') {
       if (!model) return;
-      const name = window.prompt('复制出的模型名称：', model.name + '（副本）');
+      const name = await window.ES_MODAL.prompt({
+        title: '复制续航模型', icon: 'content_copy', label: '模型名称',
+        value: model.name + '（副本）', confirmText: '复制',
+        validate: (raw) => ((raw || '').trim() ? null : '模型名称不能为空'),
+      });
       if (name === null) return;
-      const trimmed = name.trim();
-      if (!trimmed) { alert('模型名称不能为空'); return; }
-      const copy = cloneModel(model, trimmed);
+      const copy = cloneModel(model, name.trim());
       project.models.push(copy);
       project.activeModelId = copy.id;
       E.store.save();
@@ -1684,25 +2058,31 @@
     if (action === 'help') { openFormulaHelp(activeModel(project)); return; }
     if (!model) return;
     if (action === 'rename') {
-      const name = window.prompt('修改模型名称：', model.name);
+      const name = await window.ES_MODAL.prompt({
+        title: '重命名续航模型', icon: 'drive_file_rename_outline', label: '模型名称',
+        value: model.name, confirmText: '保存',
+        validate: (raw) => ((raw || '').trim() ? null : '模型名称不能为空'),
+      });
       if (name === null) return;
-      const trimmed = name.trim();
-      if (!trimmed) { alert('模型名称不能为空'); return; }
-      model.name = trimmed;
+      model.name = name.trim();
       E.store.save();
       window.ES_ENDURANCE_UI.render();
       return;
     }
     if (action === 'delete-model') {
-      if (!window.confirm('确认删除模型「' + model.name + '」？')) return;
+      const ok = await window.ES_MODAL.confirm({
+        title: '删除续航模型', icon: 'delete',
+        message: '确认删除模型「' + model.name + '」？',
+      });
+      if (!ok) return;
       project.models = project.models.filter((m) => m.id !== model.id);
       project.activeModelId = project.models[0] ? project.models[0].id : null;
       E.store.save();
       window.ES_ENDURANCE_UI.render();
       return;
     }
-    if (action === 'add-col') { addColumn(project, model); return; }
-    if (action === 'add-row') { addScenarioRow(project, model); return; }
+    if (action === 'add-col') { await addColumn(project, model); return; }
+    if (action === 'add-row') { await addScenarioRow(project, model); return; }
   }
 
   function cloneModel(model, newName) {
@@ -1728,13 +2108,23 @@
     return copy;
   }
 
-  function addColumn(project, model) {
-    const name = window.prompt('新对比列（使用模式）名称，如：中度使用：', '');
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) { alert('列名称不能为空'); return; }
-    const full = window.confirm('该列是否为「满电使用」口径？\n\n确定 = 满电（可使用时长按 Typ / Min 满容量计算）\n取消 = 普通口径（按可用容量 = Typ × 可放电比例 计算）');
-    const col = E.createColumn(trimmed, full ? 'full' : 'normal');
+  async function addColumn(project, model) {
+    const values = await window.ES_MODAL.form({
+      title: '新增对比列', icon: 'view_column', confirmText: '新增列',
+      fields: [
+        { key: 'name', label: '对比列（使用模式）名称', placeholder: '如：中度使用' },
+        {
+          key: 'kind', label: '容量口径', type: 'select', value: 'normal',
+          options: [
+            { value: 'normal', label: '普通口径（可用容量 = Typ × 可放电比例）' },
+            { value: 'full', label: '满电使用（按 Typ / Min 满容量计算）' },
+          ],
+        },
+      ],
+      validate: (v) => ((v.name || '').trim() ? null : '列名称不能为空'),
+    });
+    if (values === null) return;
+    const col = E.createColumn(values.name.trim(), values.kind === 'full' ? 'full' : 'normal');
     model.columns.push(col);
     model.foot[col.id] = E.defaultFoot(col.kind);
     project.scenarios.forEach((scenario) => {
@@ -1749,22 +2139,25 @@
     window.ES_ENDURANCE_UI.render();
   }
 
-  function addScenarioRow(project, model) {
+  async function addScenarioRow(project, model) {
     const missing = project.scenarios.filter((s) => !model.rows.some((r) => r.scenarioId === s.id));
-    const options = missing.map((s, i) => (i + 1) + '. ' + s.name).join('\n');
-    const tip = '输入要加入本模型的场景序号；输入 0 新建场景。\n\n'
-      + (options || '（项目场景已全部加入本模型，只能新建）') + '\n0. 新建场景';
-    const answer = window.prompt(tip, '1');
-    if (answer === null) return;
-    const pick = num(answer);
-    // pick=0 表示新建场景；其余序号必须落在可加入场景范围内
-    if (pick === 0) {
-      const created = createScenarioInteractively(project);
+    const NEW = '__new__';
+    const options = missing.map((s) => ({ value: s.id, label: s.name }));
+    options.push({ value: NEW, label: '＋ 新建场景' });
+    const values = await window.ES_MODAL.form({
+      title: '模型新增场景行', icon: 'playlist_add', confirmText: '加入模型',
+      fields: [{
+        key: 'scenario', label: missing.length ? '选择要加入本模型的场景' : '项目场景已全部加入，只能新建',
+        type: 'select', value: missing.length ? missing[0].id : NEW, options: options,
+      }],
+    });
+    if (values === null) return;
+    if (values.scenario === NEW) {
+      const created = await createScenarioInteractively(project);
       if (!created) return;
       appendRowForScenario(model, created.id);
     } else {
-      if (pick === null || pick < 1 || pick > missing.length) { alert('序号无效'); return; }
-      appendRowForScenario(model, missing[pick - 1].id);
+      appendRowForScenario(model, values.scenario);
     }
     E.store.save();
     window.ES_ENDURANCE_UI.render();
@@ -1777,41 +2170,52 @@
     model.rows.push({ id: uid('mr'), scenarioId: scenarioId, cells: cells });
   }
 
-  function createScenarioInteractively(project) {
-    const name = window.prompt('请输入新场景名称：', '');
+  async function createScenarioInteractively(project) {
+    const name = await window.ES_MODAL.prompt({
+      title: '新建场景', icon: 'add', label: '场景名称',
+      placeholder: '请输入场景名称', confirmText: '新建',
+      validate: (raw) => ((raw || '').trim() ? null : '场景名称不能为空'),
+    });
     if (name === null) return null;
-    const trimmed = name.trim();
-    if (!trimmed) { alert('场景名称不能为空'); return null; }
     const created = {
-      id: uid('sc'), name: trimmed, remark: '', standard: '',
+      id: uid('sc'), name: name.trim(), remark: '', standard: '',
       customCurrent: '', fields: {}, records: [],
     };
     project.scenarios.push(created);
     return created;
   }
 
-  function openColumnEditor(project, model, colId) {
+  async function openColumnEditor(project, model, colId) {
     if (!model) return;
     const col = model.columns.find((c) => c.id === colId);
     if (!col) return;
-    const name = window.prompt('对比列名称：', col.name);
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) { alert('列名称不能为空'); return; }
-    const win = window.prompt('使用时间窗口（可留空，如 8am~8pm）：', col.window || '');
-    if (win === null) return;
-    const needText = window.prompt('目标耗电量 mAh（可留空）：', col.needMah === null || col.needMah === undefined ? '' : String(col.needMah));
-    if (needText === null) return;
-    const need = num(needText);
-    if (needText.trim() !== '' && (need === null || need < 0)) { alert('目标耗电量需为不小于 0 的数字'); return; }
-    const note = window.prompt('备注（可留空）：', col.note || '');
-    if (note === null) return;
-    const full = window.confirm('该列是否为「满电使用」口径？\n\n确定 = 满电（可使用时长按 Typ / Min 满容量计算）\n取消 = 普通口径（按可用容量计算）');
-    col.name = trimmed;
-    col.window = win.trim();
-    col.needMah = needText.trim() === '' ? null : need;
-    col.note = note.trim();
-    const newKind = full ? 'full' : 'normal';
+    const values = await window.ES_MODAL.form({
+      title: '编辑对比列', icon: 'tune', confirmText: '保存',
+      fields: [
+        { key: 'name', label: '对比列名称', value: col.name },
+        { key: 'window', label: '使用时间窗口（可留空）', value: col.window || '', placeholder: '如 8am~8pm' },
+        { key: 'needMah', label: '目标耗电量 mAh（可留空）', value: col.needMah === null || col.needMah === undefined ? '' : String(col.needMah), placeholder: '不小于 0 的数字', inputmode: 'decimal' },
+        { key: 'note', label: '备注（可留空）', type: 'textarea', value: col.note || '' },
+        {
+          key: 'kind', label: '容量口径', type: 'select', value: col.kind,
+          options: [
+            { value: 'normal', label: '普通口径（可用容量 = Typ × 可放电比例）' },
+            { value: 'full', label: '满电使用（按 Typ / Min 满容量计算）' },
+          ],
+        },
+      ],
+      validate: (v) => {
+        if (!(v.name || '').trim()) return '列名称不能为空';
+        if ((v.needMah || '').trim() !== '' && (num(v.needMah) === null || num(v.needMah) < 0)) return '目标耗电量需为不小于 0 的数字';
+        return null;
+      },
+    });
+    if (values === null) return;
+    col.name = values.name.trim();
+    col.window = values.window.trim();
+    col.needMah = values.needMah.trim() === '' ? null : num(values.needMah);
+    col.note = values.note.trim();
+    const newKind = values.kind === 'full' ? 'full' : 'normal';
     if (newKind !== col.kind) {
       col.kind = newKind;
       model.foot[col.id] = E.defaultFoot(newKind);
@@ -1820,12 +2224,19 @@
     window.ES_ENDURANCE_UI.render();
   }
 
-  function deleteColumn(project, model, colId) {
+  async function deleteColumn(project, model, colId) {
     if (!model) return;
     const col = model.columns.find((c) => c.id === colId);
     if (!col) return;
-    if (model.columns.length <= 1) { alert('每个续航模型至少保留一个对比列'); return; }
-    if (!window.confirm('确认删除对比列「' + col.name + '」？该列下各场景的时长 / 耗电公式会一并删除。')) return;
+    if (model.columns.length <= 1) {
+      await window.ES_MODAL.alert({ title: '无法删除', icon: 'info', message: '每个续航模型至少保留一个对比列' });
+      return;
+    }
+    const ok = await window.ES_MODAL.confirm({
+      title: '删除对比列', icon: 'delete',
+      message: '确认删除对比列「' + col.name + '」？该列下各场景的时长 / 耗电公式会一并删除。',
+    });
+    if (!ok) return;
     model.columns = model.columns.filter((c) => c.id !== colId);
     delete model.foot[colId];
     model.rows.forEach((row) => { delete row.cells[colId]; });
@@ -1902,13 +2313,16 @@
       }
       trial();
     });
-    overlay.querySelector('[data-es-fx-save]').addEventListener('click', () => {
+    overlay.querySelector('[data-es-fx-save]').addEventListener('click', async () => {
       const text = textarea.value.trim();
       if (text.charAt(0) === '=') {
         const check = window.ES_FORMULA.checkSyntax(text.slice(1));
-        if (!check.ok) { alert('公式语法错误：' + check.error); return; }
+        if (!check.ok) {
+          await window.ES_MODAL.alert({ title: '公式语法错误', icon: 'error', message: check.error });
+          return;
+        }
       } else if (text !== '' && num(text) === null) {
-        alert('请输入数字，或以 = 开头的公式');
+        await window.ES_MODAL.alert({ title: '无法保存', icon: 'error', message: '请输入数字，或以 = 开头的公式' });
         return;
       }
       setRaw(model, desc, text);

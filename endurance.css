@@ -655,3 +655,381 @@
   .es-field-input, .es-standard-input, .es-remark-input { width: 92px; }
   .es-formula-foot { flex-direction: column; align-items: stretch; }
 }
+
+
+/* ================================================================
+ * 2026-11 UI 重构：内联输入状态 / 电池子模块 / 公共模态框 ES_MODAL
+ * ================================================================ */
+
+/* ---------- 场景表内联输入（统一功耗标准风格） ---------- */
+.es-inline-input-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+}
+.es-field-input.is-error {
+  border-color: #ef4444;
+  background: #fef2f2;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, .12);
+}
+.es-current-input { font-weight: 800; color: #4338ca; }
+.es-version-input, .es-date-input { width: 104px; }
+
+/* ---------- 电池卡片内的可放电容量查询子模块 ---------- */
+.es-submodule {
+  margin-top: .85rem;
+  padding: .75rem .8rem .8rem;
+  border: 1px solid #e0e7ff;
+  border-radius: .8rem;
+  background: #f8faff;
+}
+.es-submodule-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-bottom: .45rem;
+}
+.es-submodule-head h4 {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  margin: 0;
+  font-size: .76rem;
+  font-weight: 800;
+  color: #334155;
+}
+.es-submodule-head h4 .material-symbols-outlined { font-size: 1.05rem; color: #6366f1; }
+.es-discharge-sub .es-discharge-tip { margin-top: 0; }
+.es-discharge-sub .es-table-wrap { border-radius: .6rem; background: #fff; }
+
+/* ---------- 公共模态框 ES_MODAL ---------- */
+body.es-modal-open { overflow: hidden; }
+.es-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, .46);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 1.2rem;
+  animation: es-modal-fade .16s ease;
+}
+@keyframes es-modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.es-modal-dialog {
+  width: min(480px, 100%);
+  max-height: 86vh;
+  overflow: auto;
+  background: #fff;
+  padding: 1.05rem 1.15rem 1.1rem;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .3);
+  animation: es-modal-pop .18s cubic-bezier(.2, .9, .35, 1.2);
+}
+@keyframes es-modal-pop {
+  from { opacity: 0; transform: translateY(14px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.es-modal-dialog:has(.es-modal-table) { width: min(640px, 100%); }
+.es-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .6rem;
+  margin-bottom: .65rem;
+}
+.es-modal-head h4 {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  margin: 0;
+  font-size: .92rem;
+  font-weight: 800;
+  color: #1e293b;
+}
+.es-modal-head h4 .material-symbols-outlined { font-size: 1.2rem; color: #6366f1; }
+.es-modal-close { flex: none; }
+.es-modal-body { font-size: .78rem; color: #334155; }
+.es-modal-message {
+  margin: 0;
+  font-size: .78rem;
+  line-height: 1.75;
+  color: #475569;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.es-modal-field {
+  display: block;
+  margin-bottom: .65rem;
+}
+.es-modal-field:last-child { margin-bottom: 0; }
+.es-modal-field > span {
+  display: block;
+  margin-bottom: .28rem;
+  font-size: .7rem;
+  font-weight: 800;
+  color: #475569;
+}
+.es-modal-input {
+  width: 100%;
+  border: 1px solid #c7d2fe;
+  border-radius: .55rem;
+  padding: .5rem .65rem;
+  font-size: .8rem;
+  font-weight: 600;
+  color: #1e293b;
+  outline: none;
+  background: #fff;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+textarea.es-modal-input { resize: vertical; min-height: 4.2rem; line-height: 1.6; }
+select.es-modal-input { cursor: pointer; }
+.es-modal-input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, .15);
+}
+.es-modal-error {
+  margin: .55rem 0 0;
+  padding: .4rem .6rem;
+  border-radius: .5rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: .68rem;
+  font-weight: 700;
+}
+.es-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: .5rem;
+  margin-top: .85rem;
+}
+.es-modal-btn { min-width: 4.6rem; justify-content: center; }
+.es-modal-confirm-primary {
+  background: #4f46e5;
+  color: #fff;
+}
+.es-modal-confirm-primary:hover { background: #4338ca; }
+.es-modal-confirm-danger {
+  background: #dc2626;
+  color: #fff;
+}
+.es-modal-confirm-danger:hover { background: #b91c1c; }
+.es-modal-cancel {
+  background: #f1f5f9;
+  color: #475569;
+}
+.es-modal-cancel:hover { background: #e2e8f0; }
+
+/* ---------- 模态框内表格（历史记录等） ---------- */
+.es-modal-html { width: 100%; }
+.es-modal-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: .6rem;
+  overflow: hidden;
+  font-size: .7rem;
+}
+.es-modal-table th {
+  background: #f8faff;
+  color: #4338ca;
+  font-weight: 800;
+  text-align: left;
+  padding: .45rem .55rem;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+.es-modal-table td {
+  padding: .4rem .55rem;
+  border-bottom: 1px solid #f1f5f9;
+  color: #475569;
+  vertical-align: middle;
+}
+.es-modal-table tbody tr:last-child td { border-bottom: none; }
+.es-modal-table tbody tr:hover { background: #f8faff; }
+.es-history-num { font-weight: 800; color: #334155; white-space: nowrap; }
+.es-history-tag {
+  display: inline-block;
+  margin-left: .4rem;
+  padding: .04rem .4rem;
+  border-radius: 999px;
+  background: #ede9fe;
+  color: #6d28d9;
+  font-size: .58rem;
+  font-weight: 800;
+  font-style: normal;
+  white-space: nowrap;
+}
+.es-history-banner {
+  margin: 0 0 .6rem;
+  padding: .45rem .6rem;
+  border-radius: .55rem;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  font-size: .68rem;
+  font-weight: 700;
+}
+.es-modal-hint {
+  margin: .5rem 0 0;
+  color: #94a3b8;
+  font-size: .64rem;
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .es-modal-dialog { padding: .9rem .85rem 1rem; }
+  .es-modal-foot { flex-direction: column-reverse; align-items: stretch; }
+  .es-modal-foot .template-btn { width: 100%; }
+  .es-version-input, .es-date-input { width: 92px; }
+}
+
+
+/* ================================================================
+ * DOU 续航模型：Excel 风格网格皮肤
+ * 全单元格网格线 + 列标（A/B/C）+ 行号（1/2/3）+ 选中态
+ * ================================================================ */
+.es-model-table-wrap {
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
+  background: #fff;
+}
+.es-excel-grid {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-size: .7rem;
+}
+.es-excel-grid th,
+.es-excel-grid td {
+  border: 1px solid #d4d4d4 !important;
+  padding: .22rem .3rem;
+  vertical-align: middle;
+}
+
+/* 列标行 / 行号列：Excel 经典灰 */
+.es-excel-colbar .es-excel-colhead,
+.es-excel-rownum,
+.es-excel-rowhead {
+  background: #f3f3f3;
+  color: #5f6368;
+  font-size: .62rem;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  user-select: none;
+  padding: .15rem .25rem;
+}
+.es-excel-rownum {
+  width: 2.3rem;
+  min-width: 2.3rem;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+tbody .es-excel-rownum { background: #f8f8f8; }
+.es-excel-noaddr { color: #bbb; }
+.es-excel-colbar .es-excel-colhead { min-width: 3.4rem; }
+
+/* 模式表头（典型使用等）收敛为 Excel 浅灰表头 */
+.es-excel-grid thead .es-mode-head,
+.es-excel-grid thead .es-corner,
+.es-excel-grid thead .es-sub {
+  background: #f8f9fb;
+  color: #334155;
+}
+.es-excel-grid thead .es-sub {
+  font-size: .64rem;
+  font-weight: 800;
+  text-align: center;
+}
+.es-excel-grid .es-sc-name {
+  background: #fff;
+  font-weight: 800;
+  color: #1e293b;
+  white-space: nowrap;
+}
+.es-excel-grid .es-current-cell {
+  text-align: center;
+  font-weight: 800;
+  color: #4338ca;
+  white-space: nowrap;
+}
+
+/* 行悬停：Excel 式浅蓝 */
+.es-excel-grid tbody tr:hover td,
+.es-excel-grid tbody tr:hover th {
+  background-color: #eef4ff;
+}
+.es-excel-grid tbody tr:hover .es-excel-rownum { background-color: #e3edff; }
+
+/* 时长输入：默认无框透明，聚焦时 Excel 选中态 */
+.es-excel-grid .es-duration-wrap {
+  padding: 0 !important;
+  background: #fff;
+}
+.es-excel-grid .es-duration-input {
+  width: 100%;
+  min-width: 4.6rem;
+  border: 1px solid transparent;
+  border-radius: 0;
+  padding: .28rem .35rem;
+  font-size: .7rem;
+  font-weight: 700;
+  color: #1e293b;
+  background: transparent;
+  outline: none;
+  text-align: center;
+}
+.es-excel-grid .es-duration-input:hover { border-color: #c7d2fe; }
+.es-excel-grid .es-duration-input:focus {
+  border: 2px solid #1a73e8;
+  padding: calc(.28rem - 1px) calc(.35rem - 1px);
+  background: #fff;
+  box-shadow: none;
+}
+.es-excel-grid .es-duration-wrap.is-formula { background: #f5f3ff; }
+.es-excel-grid .es-duration-wrap.is-error .es-duration-input {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+.es-excel-grid .es-formula-result {
+  margin: 0;
+  padding: .05rem .3rem .12rem;
+  text-align: center;
+  background: #f5f3ff;
+}
+
+/* 公式结果格 */
+.es-excel-grid .es-formula-cell {
+  background: #fcfcff;
+  padding: .2rem .3rem !important;
+}
+.es-excel-grid .es-formula-cell.is-formula { background: #f5f3ff; }
+.es-excel-grid .es-formula-cell.is-error { background: #fef2f2; }
+.es-excel-grid tbody tr:hover .es-formula-cell { background-color: #eef4ff; }
+.es-excel-grid tbody tr:hover .es-formula-cell.is-formula { background-color: #ede9fe; }
+
+/* tfoot 统计区与数据区视觉分层 */
+.es-excel-grid tfoot td,
+.es-excel-grid tfoot th {
+  background: #fafafa;
+  font-weight: 800;
+}
+.es-excel-grid tfoot .es-formula-cell { background: #f5f6f8; }
+.es-excel-grid tfoot .es-formula-cell.is-formula { background: #f5f3ff; }
+.es-excel-grid tfoot .es-stat-blank { background: #f1f3f5; }
+.es-excel-grid tfoot .es-stat-auto td { color: #475569; }
+
+@media (max-width: 640px) {
+  .es-excel-grid { font-size: .66rem; }
+  .es-excel-rownum { width: 1.8rem; min-width: 1.8rem; }
+}
