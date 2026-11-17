@@ -476,7 +476,203 @@
       }
       this.save();
     },
+    // 导入一个项目：先全量重生成内部 id（保证与现有项目零碰撞、可重复导入为独立副本），
+    // 再按同名规则改名，最后复用 normalizeData 补齐字段 / 迁移 v1 模型；绝不静默覆盖现有数据。
+    importProject(projectLike) {
+      const data = this.load();
+      const reidentified = reidentifyProject(projectLike);
+      reidentified.name = uniqueProjectName(reidentified.name, data.projects.map((p) => p.name));
+      data.projects.push(reidentified);
+      data.activeProjectId = reidentified.id;
+      normalizeData(data);
+      this.save();
+      return reidentified;
+    },
   };
+
+  // ---------- 项目导入 / 导出（纯本地、零云端依赖，用于多设备之间手工迁移）----------
+  const EXPORT_APP = 'power-analysis';
+  const EXPORT_KIND = 'endurance-project';
+  const EXPORT_FORMAT = 1;
+
+  function deepClone(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  // 文件名清洗：去除文件系统非法字符与控制符、折叠空白；为空时回退到 fallback
+  function sanitizeFileName(name, fallback) {
+    const cleaned = String(name === null || name === undefined ? '' : name)
+      .replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80);
+    return cleaned || fallback || '续航项目';
+  }
+
+  // 导出文件名时间戳：YYYYMMDD-HHmm
+  function fileTimestamp(date) {
+    const d = date || new Date();
+    const pad = (x) => String(x).padStart(2, '0');
+    return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate())
+      + '-' + pad(d.getHours()) + pad(d.getMinutes());
+  }
+
+  // 构造导出载荷：深拷贝项目并附带格式标识 / 时间，导入端据此校验
+  function buildProjectExport(project) {
+    return {
+      app: EXPORT_APP,
+      module: 'endurance',
+      kind: EXPORT_KIND,
+      formatVersion: EXPORT_FORMAT,
+      exportedAt: new Date().toISOString(),
+      project: deepClone(project),
+    };
+  }
+
+  // 项目结构基本校验：必须有名称，场景 / 模型 / 自定义字段若存在必须是数组
+  function isValidProjectShape(project) {
+    if (!project || typeof project !== 'object') return false;
+    if (!project.name || typeof project.name !== 'string') return false;
+    if (project.scenarios !== undefined && !Array.isArray(project.scenarios)) return false;
+    if (project.models !== undefined && !Array.isArray(project.models)) return false;
+    if (project.scenarioFields !== undefined && !Array.isArray(project.scenarioFields)) return false;
+    return true;
+  }
+
+  // 解析并严格校验导入文本；兼容「包装载荷」与「裸 project」两种形态
+  function parseProjectImport(text) {
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      return { ok: false, error: '文件不是合法的 JSON，请确认选择的是本工具导出的项目文件（.json）。' };
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      return { ok: false, error: '文件内容结构不正确，未找到续航项目数据。' };
+    }
+    const project = parsed.project && typeof parsed.project === 'object' ? parsed.project : parsed;
+    if (!isValidProjectShape(project)) {
+      return { ok: false, error: '未在文件中找到有效的续航项目（缺少项目名称，或场景 / 模型数据结构不正确）。' };
+    }
+    return { ok: true, project: deepClone(project) };
+  }
+
+  // 同名去重：已存在则追加「（导入 n）」后缀，保证项目名可区分
+  function uniqueProjectName(baseName, existingNames) {
+    const base = String(baseName || '').trim() || '导入项目';
+    const used = new Set((existingNames || []).map((n) => String(n)));
+    if (!used.has(base)) return base;
+    let n = 1;
+    while (used.has(base + '（导入 ' + n + '）')) n += 1;
+    return base + '（导入 ' + n + '）';
+  }
+
+  // 全量重生成项目内部 id 并维护引用映射：
+  // 场景 id 被模型行 scenarioId 引用；列 id 被 cells / foot 的 key 引用；自定义字段 id 被 scenario.fields 的 key 引用。
+  // 重生成后项目内部引用保持完整，且与任何现有项目零 id 碰撞，同一文件可重复导入为互不影响的副本。
+  function reidentifyProject(input) {
+    const p = deepClone(input);
+    p.id = uid('p');
+
+    // 1) 自定义字段 id（被各 scenario.fields 的 key 引用）
+    const fieldIdMap = {};
+    p.scenarioFields = (Array.isArray(p.scenarioFields) ? p.scenarioFields : []).map((f) => {
+      const next = Object.assign({}, f, { id: uid('sf') });
+      if (f.id !== undefined && f.id !== null) fieldIdMap[String(f.id)] = next.id;
+      return next;
+    });
+
+    // 2) 电池可放电容量查询表点 id（无外部引用，重生成保持 id 体系统一）
+    if (p.battery && Array.isArray(p.battery.dischargeTable)) {
+      p.battery.dischargeTable = p.battery.dischargeTable.map((d) => Object.assign({}, d, { id: uid('dt') }));
+    }
+
+    // 3) 场景 id + 测试记录 id + 场景内自定义字段 key 重映射
+    const scenarioIdMap = {};
+    p.scenarios = (Array.isArray(p.scenarios) ? p.scenarios : []).map((s) => {
+      const next = Object.assign({}, s);
+      next.id = uid('sc');
+      if (s.id !== undefined && s.id !== null) scenarioIdMap[String(s.id)] = next.id;
+      next.records = (Array.isArray(s.records) ? s.records : []).map((r) => Object.assign({}, r, { id: uid('rec') }));
+      if (s.fields && typeof s.fields === 'object') {
+        const remapped = {};
+        Object.keys(s.fields).forEach((oldKey) => {
+          const newKey = Object.prototype.hasOwnProperty.call(fieldIdMap, oldKey) ? fieldIdMap[oldKey] : oldKey;
+          remapped[newKey] = s.fields[oldKey];
+        });
+        next.fields = remapped;
+      }
+      return next;
+    });
+
+    // 4) 模型：model / 列（或 v1 的 mode）/ 行 id，foot 与 cells、v1 durations 的 key、行 scenarioId 全部重映射
+    const oldModels = Array.isArray(input.models) ? input.models : [];
+    p.models = (Array.isArray(p.models) ? p.models : []).map((m) => {
+      const model = Object.assign({}, m);
+      model.id = uid('m');
+      const colIdMap = {};
+      if (Array.isArray(m.columns)) {
+        // v2：重生成对比列 id
+        model.columns = m.columns.map((c) => {
+          const next = Object.assign({}, c, { id: uid('md') });
+          colIdMap[String(c.id)] = next.id;
+          return next;
+        });
+      } else if (Array.isArray(m.modes)) {
+        // v1：重生成 mode id（迁移为 v2 后即列 id），并同步 rows.durations 的 key
+        model.modes = m.modes.map((mode) => {
+          const next = Object.assign({}, mode, { id: uid('md') });
+          colIdMap[String(mode.id)] = next.id;
+          return next;
+        });
+      }
+      const mapKey = (map, oldKey) => (Object.prototype.hasOwnProperty.call(map, oldKey) ? map[oldKey] : oldKey);
+      if (model.foot && typeof model.foot === 'object') {
+        const remappedFoot = {};
+        Object.keys(model.foot).forEach((oldKey) => { remappedFoot[mapKey(colIdMap, oldKey)] = model.foot[oldKey]; });
+        model.foot = remappedFoot;
+      }
+      model.rows = (Array.isArray(m.rows) ? m.rows : []).map((r) => {
+        const next = { id: uid('mr'), note: r.note || '' };
+        next.scenarioId = mapKey(scenarioIdMap, String(r.scenarioId)) !== String(r.scenarioId)
+          ? scenarioIdMap[String(r.scenarioId)] : r.scenarioId;
+        if (r.cells && typeof r.cells === 'object') {
+          const cells = {};
+          Object.keys(r.cells).forEach((oldKey) => { cells[mapKey(colIdMap, oldKey)] = r.cells[oldKey]; });
+          next.cells = cells;
+        }
+        // v1 时长矩阵：保留 durations 并重映射其 mode key，供后续 migrateModelV1 取数
+        if (r.durations && typeof r.durations === 'object') {
+          const durations = {};
+          Object.keys(r.durations).forEach((oldKey) => { durations[mapKey(colIdMap, oldKey)] = r.durations[oldKey]; });
+          next.durations = durations;
+        }
+        return next;
+      });
+      return model;
+    });
+
+    // 5) activeModelId 按旧数组的同位置映射到新模型 id；找不到则回退首个模型
+    const oldActiveIndex = oldModels.findIndex((m) => String(m.id) === String(input.activeModelId));
+    p.activeModelId = oldActiveIndex >= 0 && p.models[oldActiveIndex]
+      ? p.models[oldActiveIndex].id
+      : (p.models[0] ? p.models[0].id : null);
+
+    return p;
+  }
+
+  // 触发浏览器下载一个文本文件（JSON），用完即释放对象 URL
+  function downloadTextFile(filename, text, mime) {
+    const blob = new Blob([text], { type: (mime || 'application/json') + ';charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    if (anchor.parentNode) anchor.parentNode.removeChild(anchor);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 
   // ---------- 业务查询 ----------
   // 场景当前生效电流：自定义电流优先，否则取最新一条记录（按日期，同日取最后录入）
@@ -739,6 +935,8 @@
     sortDischargeTable, lookupDischargeCapacity, deriveDischargeRatio,
     DEFAULT_MAH_FORMULA, defaultFoot, createColumn, createModelV2, migrateModelV1,
     defaultScenarioDefs, buildDefaultScenarios, mergeDefaultScenarios, currentCompare,
+    sanitizeFileName, fileTimestamp, buildProjectExport, parseProjectImport,
+    isValidProjectShape, uniqueProjectName, reidentifyProject, downloadTextFile,
     GRID_LAYOUT_KEY, GRID_COL_ROLES, GRID_ROW_H, GRID_DEFAULT_ROWH,
     defaultGridLayout, loadGridLayout, saveGridLayout, resetGridLayout, clampGridColWidth,
     colLetterFor, rowNumberFor, totalRowNumber, douRowNumber, addressOf,
@@ -1019,8 +1217,11 @@
       + '<div class="es-project-chips" role="group" aria-label="项目切换">' + chips + '</div>'
       + '<div class="es-project-actions">'
       + '<button type="button" class="template-btn template-btn-primary es-add-project-btn"><span class="material-symbols-outlined text-sm">add</span>新增项目</button>'
-      + (project ? '<button type="button" class="template-btn es-rename-project-btn"><span class="material-symbols-outlined text-sm">drive_file_rename_outline</span>重命名</button>'
+      + '<button type="button" class="template-btn es-import-project-btn"><span class="material-symbols-outlined text-sm">upload_file</span>导入项目</button>'
+      + (project ? '<button type="button" class="template-btn es-export-project-btn"><span class="material-symbols-outlined text-sm">download</span>导出项目</button>'
+        + '<button type="button" class="template-btn es-rename-project-btn"><span class="material-symbols-outlined text-sm">drive_file_rename_outline</span>重命名</button>'
         + '<button type="button" class="template-btn template-btn-danger es-delete-project-btn"><span class="material-symbols-outlined text-sm">delete</span>删除项目</button>' : '')
+      + '<input type="file" class="es-import-file-input" accept=".json,application/json" hidden />'
       + '</div></div>';
   }
 
@@ -1043,6 +1244,37 @@
         render();
       });
     });
+    // 导出当前项目为 .json：纯本地下载，不经过任何云端
+    const exportBtn = root.querySelector('.es-export-project-btn');
+    if (exportBtn && project) {
+      exportBtn.addEventListener('click', () => {
+        try {
+          const payload = E.buildProjectExport(project);
+          const fileName = '续航项目_' + E.sanitizeFileName(project.name) + '_' + E.fileTimestamp() + '.json';
+          E.downloadTextFile(fileName, JSON.stringify(payload, null, 2));
+        } catch (error) {
+          window.ES_MODAL.alert({
+            title: '导出失败', icon: 'error',
+            message: '生成项目文件失败：' + (error && error.message ? error.message : '未知错误'),
+          });
+        }
+      });
+    }
+    // 导入 .json：隐藏 file input 选文件 → FileReader 读取 → 校验 → 作为独立副本写入
+    const importBtn = root.querySelector('.es-import-project-btn');
+    const fileInput = root.querySelector('.es-import-file-input');
+    if (importBtn && fileInput) {
+      importBtn.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => handleImportText(String(reader.result || ''));
+        reader.onerror = () => window.ES_MODAL.alert({ title: '导入失败', icon: 'error', message: '读取文件失败，请重试。' });
+        reader.readAsText(file);
+        fileInput.value = ''; // 复位，允许再次选择同一个文件
+      });
+    }
     const renameBtn = root.querySelector('.es-rename-project-btn');
     if (renameBtn && project) {
       renameBtn.addEventListener('click', async () => {
@@ -1069,6 +1301,33 @@
         render();
       });
     }
+  }
+
+  // 解析导入文本并落库；任何非法输入都通过弹窗提示，绝不破坏现有数据
+  async function handleImportText(text) {
+    const parsed = E.parseProjectImport(text);
+    if (!parsed.ok) {
+      await window.ES_MODAL.alert({ title: '无法导入', icon: 'error', message: parsed.error });
+      return;
+    }
+    let imported;
+    try {
+      imported = E.store.importProject(parsed.project);
+    } catch (error) {
+      await window.ES_MODAL.alert({
+        title: '导入失败', icon: 'error',
+        message: '写入项目数据失败：' + (error && error.message ? error.message : '未知错误'),
+      });
+      return;
+    }
+    const scenarioCount = Array.isArray(imported.scenarios) ? imported.scenarios.length : 0;
+    const modelCount = Array.isArray(imported.models) ? imported.models.length : 0;
+    await window.ES_MODAL.alert({
+      title: '导入成功', icon: 'check_circle',
+      message: '已作为独立副本导入项目「' + imported.name + '」\n场景 ' + scenarioCount + ' 个、模型 '
+        + modelCount + ' 个。\n原有项目与本地数据均未改动。',
+    });
+    render();
   }
 
   // ---------- 项目看板骨架 ----------
