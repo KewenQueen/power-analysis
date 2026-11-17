@@ -101,7 +101,7 @@
       columns.forEach((col) => { cells[col.id] = { d: '0', m: DEFAULT_MAH_FORMULA }; });
       return { id: uid('mr'), scenarioId: scenario.id, note: '', cells: cells };
     });
-    return { v: 2, id: uid('m'), name: name, columns: columns, rows: rows, foot: foot };
+    return { v: 3, id: uid('m'), name: name, columns: columns, rows: rows, foot: foot };
   }
 
   // v1（纯时长矩阵）模型迁移为 v2 公式网格；保留原 mode id 以减少外部引用断裂
@@ -157,6 +157,7 @@
       standard: '',
       customCurrent: '',
       fields: {},
+      singleLife: '',
       records: [{ id: uid('rec'), date: todayStr(), version: version || 'UT', current: def[1], note: note || '云表默认场景电流' }],
     }));
   }
@@ -179,6 +180,7 @@
         standard: '',
         customCurrent: '',
         fields: {},
+        singleLife: '',
         records: [{ id: uid('rec'), date: todayStr(), version: version, current: def[1], note: note }],
       };
       project.scenarios.push(scenario);
@@ -341,12 +343,14 @@
       (project.scenarios || []).forEach((scenario) => {
         if (!('standard' in scenario)) { scenario.standard = ''; changed = true; }
         if (!('customCurrent' in scenario)) { scenario.customCurrent = ''; changed = true; }
+        if (!('singleLife' in scenario)) { scenario.singleLife = ''; changed = true; }
         if (!scenario.fields || typeof scenario.fields !== 'object') { scenario.fields = {}; changed = true; }
         if (!Array.isArray(scenario.records)) scenario.records = [];
       });
       if (Array.isArray(project.models)) {
         project.models = project.models.map((model) => {
-          const migrated = model.v === 2 ? model : migrateModelV1(model);
+          // v1（无 v 或 v=1）先迁移为 v2 结构；v2/v3 原样保留
+          const migrated = model.v === 2 || model.v === 3 ? model : migrateModelV1(model);
           // 一次性迁移：旧默认耗电公式升级为带 0 时长保护的 IF 公式（用户自定义公式保持不动）
           (migrated.rows || []).forEach((row) => {
             Object.keys(row.cells || {}).forEach((colId) => {
@@ -356,7 +360,11 @@
               }
             });
           });
-          if (migrated.v !== 2) changed = true;
+          // v2 虚拟地址 → v3 连续物理地址（重写裸 A1 引用；命名公式无裸地址，仅升版本号）
+          if (migrated.v !== 3) {
+            migrateModelAddressesV2ToV3(migrated);
+            changed = true;
+          }
           return migrated;
         });
       } else {
@@ -693,11 +701,16 @@
     return rec ? num(rec.current) : null;
   }
 
-  // ---------- A1 网格映射 ----------
-  // A 列=场景名；第 i 个对比列（0-based）占 时长列(2+2i) / 耗电列(3+2i)；
+  // ---------- A1 网格映射（v3：物理列与公式地址统一，列标连续无空白）----------
+  // 物理/公式列：1=A 场景名，2=B 电流；第 i 个对比列（0-based）模块占三列：
+  //   时长列 (3+3i) / 耗电列 (4+3i) / 备注列 (5+3i，文本不参与公式)。
   // 第 1 行表头，场景行从第 2 行开始，其后依次为 Total 行、DOU 行。
   function colLetterFor(colIndex, cellType) {
-    return window.ES_FORMULA.colToLetter(2 + colIndex * 2 + (cellType === 'm' ? 1 : 0));
+    return window.ES_FORMULA.colToLetter(3 + colIndex * 3 + (cellType === 'm' ? 1 : 0));
+  }
+  // 备注列字母（仅用于列标展示，公式不可引用文本备注）
+  function noteLetterFor(colIndex) {
+    return window.ES_FORMULA.colToLetter(5 + colIndex * 3);
   }
   function rowNumberFor(rowIndex) { return 2 + rowIndex; }
   function totalRowNumber(model) { return 2 + model.rows.length; }
@@ -711,6 +724,105 @@
     }
     const row = desc.t === 'td' || desc.t === 'tm' ? totalRowNumber(model) : douRowNumber(model);
     return colLetterFor(colIndex, desc.t === 'td' || desc.t === 'douTyp' ? 'd' : 'm') + row;
+  }
+
+  // ---------- 旧地址（v2）→ 新地址（v3）迁移 ----------
+  // v2 虚拟地址：模型 i 时长 col=2+2i、耗电 col=3+2i（电流/备注无地址）；
+  // v3 连续地址：模型 i 时长 col=3+3i、耗电 col=4+3i（电流占 B=2，备注占模块第三列）。
+  // 仅迁移模型区（col>=2）；场景 A=col1 不变，行号不变。
+  function remapLegacyCol(oldCol) {
+    if (oldCol < 2) return oldCol;
+    const i = Math.floor((oldCol - 2) / 2);
+    const isM = (oldCol - 2) % 2 === 1;
+    return 3 + i * 3 + (isM ? 1 : 0);
+  }
+  // 重写公式字符串中的 A1 引用列字母，保留 $ 绝对标记与行号；非公式（数字/中文名公式）原样返回。
+  // token 边界保护：
+  //  - 前置负向回顾：列字母前不得是标识符/数字/小数点/中文，避免科学计数法 1E5、名称延续被误判；
+  //  - 行号首位禁 0（Excel 无 0 行），避免 V0.1 这类命名被当成引用；
+  //  - 后置负向先行：行号后不得紧跟标识符/中文，避免 B2场景 这类命名内片段被迁移。
+  function remapFormulaRefs(raw) {
+    if (typeof raw !== 'string' || raw.charAt(0) !== '=') return raw;
+    return raw.replace(/(?<![A-Za-z0-9_.\u4e00-\u9fff])(\$?)([A-Za-z]{1,3})(\$?)([1-9][0-9]{0,4})(?![A-Za-z0-9_.\u4e00-\u9fff])/g, (m, d1, letters, d2, rowDigits) => {
+      const oldCol = window.ES_FORMULA.letterToCol(letters);
+      const newCol = remapLegacyCol(oldCol);
+      if (newCol === oldCol) return m;
+      return d1 + window.ES_FORMULA.colToLetter(newCol) + d2 + rowDigits;
+    });
+  }
+  // 把 v2 模型内所有裸地址公式迁移到 v3 连续地址，并标记 v=3
+  function migrateModelAddressesV2ToV3(model) {
+    const walk = (raw) => remapFormulaRefs(raw);
+    (model.rows || []).forEach((row) => {
+      Object.keys(row.cells || {}).forEach((colId) => {
+        const cell = row.cells[colId];
+        if (cell) { cell.d = walk(cell.d); cell.m = walk(cell.m); }
+      });
+    });
+    Object.keys(model.foot || {}).forEach((colId) => {
+      const f = model.foot[colId];
+      if (f) ['td', 'tm', 'douTyp', 'douMin'].forEach((k) => { if (typeof f[k] === 'string') f[k] = walk(f[k]); });
+    });
+    model.v = 3;
+    return model;
+  }
+
+  // 电池参数命名表：供 DOU 网格与单场景续航公式共用，随电池卡片实时联动、不硬编码容量。
+  // 缺容量/关机电压等返回 #VALUE! 占位对象，比例空值按 1、门限空值按 0。
+  function batteryNameValues(project) {
+    const ET = window.ES_FORMULA.ERROR_TYPES;
+    const b = (project && project.battery) || {};
+    const capTyp = num(b.capTyp);
+    const capMin = num(b.capMin);
+    const ratioRaw = num(b.dischargeRatio);
+    const thresholdRaw = num(b.lowThreshold);
+    const ratio = ratioRaw === null ? 1 : ratioRaw;
+    const threshold = thresholdRaw === null ? 0 : thresholdRaw;
+    const need = (v) => (v === null ? { type: ET.VALUE } : v);
+    const available = capTyp === null ? { type: ET.VALUE } : capTyp * ratio;
+    const derated = capTyp === null ? { type: ET.VALUE } : capTyp * ratio * (1 - threshold);
+    return {
+      'Typ': need(capTyp), 'Typ容量': need(capTyp), '电池容量': need(capTyp),
+      'Min': need(capMin), 'Min容量': need(capMin),
+      '比例': ratio, '可放电比例': ratio, '可放电容量比例': ratio,
+      '门限': threshold, '低电量门限': threshold,
+      '可用容量': available, '可用电量': available,
+      '折减容量': derated,
+      '关机电压': need(num(b.shutdownVoltage)),
+      'Wh': need(num(b.wh)), '电压': need(num(b.voltage)),
+    };
+  }
+
+  // 单场景续航求值：每个场景一条独立公式（scenario.singleLife），无 A1 网格地址，
+  // 仅支持电池参数命名 + 本场景电流命名；空公式返回 empty，纯数字直接取值，出错返回错误码。
+  function evaluateSingleLife(project, scenario) {
+    const F = window.ES_FORMULA;
+    const ET = F.ERROR_TYPES;
+    const raw = scenario && scenario.singleLife;
+    if (raw === null || raw === undefined) return { ok: true, empty: true, value: null };
+    const s = String(raw).trim();
+    if (s === '') return { ok: true, empty: true, value: null };
+    const names = batteryNameValues(project);
+    const current = scenarioCurrent(project, scenario.id);
+    const ctx = {
+      getRef() { return { type: ET.REF }; },
+      getRange() { return { type: ET.REF }; },
+      getName(name) {
+        if (Object.prototype.hasOwnProperty.call(names, name)) return names[name];
+        if (name === '电流' || name === '场景电流' || name === '当前电流' || name === '本行电流') {
+          return current === null ? { type: ET.REF } : current;
+        }
+        return { type: ET.NAME };
+      },
+      cellKey(ref) { return 'single:' + (ref && ref.label ? ref.label : ''); },
+    };
+    if (s.charAt(0) === '=') {
+      const r = F.evaluate(s.slice(1), ctx);
+      return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
+    }
+    const v = num(s);
+    if (v === null) return { ok: false, error: ET.VALUE };
+    return { ok: true, value: v };
   }
 
   // ---------- 公式网格求值 ----------
@@ -727,13 +839,15 @@
       return desc.kind + '|' + (desc.rowId || '') + '|' + desc.colId + '|' + desc.t;
     }
 
-    // A1 地址 -> 单元格描述
+    // A1 地址 -> 单元格描述（v3 连续地址：col1 场景、col2 电流不支持裸引用；模型 i 占 3+3i 起三列）
     function refToDesc(ref) {
-      if (ref.col < 2) return null;
-      const ci = Math.floor((ref.col - 2) / 2);
-      const isM = (ref.col - 2) % 2 === 1;
+      if (ref.col < 3) return null;
+      const offset = (ref.col - 3) % 3;
+      if (offset === 2) return null; // 备注列为文本，不参与公式
+      const ci = Math.floor((ref.col - 3) / 3);
       if (ci >= model.columns.length) return null;
       const colId = model.columns[ci].id;
+      const isM = offset === 1;
       if (ref.row >= 2 && ref.row <= 1 + n) {
         const row = model.rows[ref.row - 2];
         return { kind: 'cell', rowId: row.id, colId: colId, t: isM ? 'm' : 'd' };
@@ -741,29 +855,6 @@
       if (ref.row === totalRow) return { kind: 'foot', colId: colId, t: isM ? 'tm' : 'td' };
       if (ref.row === douRow) return { kind: 'foot', colId: colId, t: isM ? 'douMin' : 'douTyp' };
       return null;
-    }
-
-    function batteryNames() {
-      const b = project.battery || {};
-      const capTyp = num(b.capTyp);
-      const capMin = num(b.capMin);
-      const ratioRaw = num(b.dischargeRatio);
-      const thresholdRaw = num(b.lowThreshold);
-      const ratio = ratioRaw === null ? 1 : ratioRaw;
-      const threshold = thresholdRaw === null ? 0 : thresholdRaw;
-      const need = (v) => (v === null ? { type: ET.VALUE } : v);
-      const available = capTyp === null ? { type: ET.VALUE } : capTyp * ratio;
-      const derated = capTyp === null ? { type: ET.VALUE } : capTyp * ratio * (1 - threshold);
-      return {
-        'Typ': need(capTyp), 'Typ容量': need(capTyp), '电池容量': need(capTyp),
-        'Min': need(capMin), 'Min容量': need(capMin),
-        '比例': ratio, '可放电比例': ratio, '可放电容量比例': ratio,
-        '门限': threshold, '低电量门限': threshold,
-        '可用容量': available, '可用电量': available,
-        '折减容量': derated,
-        '关机电压': need(num(b.shutdownVoltage)),
-        'Wh': need(num(b.wh)), '电压': need(num(b.voltage)),
-      };
     }
 
     function evalCell(desc, visiting) {
@@ -805,7 +896,7 @@
 
     function makeCtx(desc, scopeRow, visiting) {
       const colIndex = model.columns.findIndex((c) => c.id === desc.colId);
-      const names = batteryNames();
+      const names = batteryNameValues(project);
 
       function rowResult(row, cellType) {
         return evalCell({ kind: 'cell', rowId: row.id, colId: desc.colId, t: cellType }, visiting);
@@ -931,7 +1022,7 @@
     STORAGE_KEY, CHART_COLORS, chartInstances, destroyCharts,
     uid, escapeHtml, num, fmt, todayStr, debounce,
     store, defaultBattery, latestRecord, scenarioCurrent,
-    computeModeStats, computeModelStats, evaluateModel,
+    computeModeStats, computeModelStats, evaluateModel, evaluateSingleLife,
     sortDischargeTable, lookupDischargeCapacity, deriveDischargeRatio,
     DEFAULT_MAH_FORMULA, defaultFoot, createColumn, createModelV2, migrateModelV1,
     defaultScenarioDefs, buildDefaultScenarios, mergeDefaultScenarios, currentCompare,
@@ -939,7 +1030,8 @@
     isValidProjectShape, uniqueProjectName, reidentifyProject, downloadTextFile,
     GRID_LAYOUT_KEY, GRID_COL_ROLES, GRID_ROW_H, GRID_DEFAULT_ROWH,
     defaultGridLayout, loadGridLayout, saveGridLayout, resetGridLayout, clampGridColWidth,
-    colLetterFor, rowNumberFor, totalRowNumber, douRowNumber, addressOf,
+    colLetterFor, noteLetterFor, rowNumberFor, totalRowNumber, douRowNumber, addressOf,
+    remapLegacyCol, remapFormulaRefs, migrateModelAddressesV2ToV3, normalizeData,
   };
 })();
 
@@ -1753,7 +1845,7 @@
 
   function renderScenarioCard(project) {
     const customFields = project.scenarioFields || [];
-    const head = '<th>场景</th><th>功耗标准</th><th>当前电流</th><th>测试版本</th><th>更新日期</th><th>备注/说明</th>'
+    const head = '<th>场景</th><th>功耗标准</th><th>当前电流</th><th>单场景续航</th><th>测试版本</th><th>更新日期</th><th>备注/说明</th>'
       + customFields.map((f) => '<th class="es-custom-th">' + escapeHtml(f.name)
         + '<button type="button" class="es-field-del" data-es-field-delete="' + escapeHtml(f.id) + '" title="删除该列"><span class="material-symbols-outlined">close</span></button></th>').join('')
       + '<th class="es-col-ops">管理</th>';
@@ -1780,6 +1872,21 @@
         + (isCustom ? '<em class="es-custom-chip" title="自定义电流，不来自测试记录">自定义</em>'
           + '<button type="button" class="es-icon-btn es-inline-clear" data-es-action="clear-custom" title="清除自定义，恢复测试记录电流"><span class="material-symbols-outlined">restart_alt</span></button>' : '')
         + '</div></td>';
+      // 单场景续航：每场景一条独立公式（默认留空）。空显示「未设置」，错误显示错误码，fx 打开专属编辑器
+      const sl = E.evaluateSingleLife(project, scenario);
+      const slIsFormula = String(scenario.singleLife || '').trim().charAt(0) === '=';
+      const slCls = 'es-singlelife-cell' + (slIsFormula ? ' is-formula' : '') + (sl.ok ? '' : ' is-error');
+      let slInner;
+      if (!sl.ok) {
+        slInner = '<span class="es-cell-text es-cell-text-error" title="' + escapeHtml(sl.error) + '">' + escapeHtml(sl.error) + '</span>';
+      } else if (sl.empty) {
+        slInner = '<span class="es-cell-empty">未设置</span>';
+      } else {
+        slInner = '<span class="es-cell-text">' + escapeHtml(fmt(sl.value, 4)) + '</span>';
+      }
+      const slCell = '<td class="' + slCls + '">' + slInner
+        + '<button type="button" class="es-fx-btn" data-es-singlelife-fx="' + escapeHtml(scenario.id)
+        + '" title="编辑单场景续航公式 / 数值">fx</button></td>';
       const customCells = customFields.map((f) => '<td><input type="text" class="es-field-input" data-es-field-row="' + escapeHtml(scenario.id)
         + '" data-es-field-col="' + escapeHtml(f.id) + '" value="' + escapeHtml(scenario.fields && scenario.fields[f.id] || '') + '" autocomplete="off" /></td>').join('');
       return '<tr data-es-scenario="' + escapeHtml(scenario.id) + '">'
@@ -1788,6 +1895,7 @@
         + '<td><input type="text" class="es-field-input es-standard-input" data-es-standard="' + escapeHtml(scenario.id)
         + '" value="' + escapeHtml(scenario.standard || '') + '" placeholder="功耗标准 / 门限" autocomplete="off" /></td>'
         + currentCell
+        + slCell
         + '<td><input type="text" class="es-field-input es-version-input" data-es-version="' + escapeHtml(scenario.id)
         + '" data-es-version-orig="' + escapeHtml(versionText)
         + '" value="' + escapeHtml(versionText) + '" placeholder="测试版本" autocomplete="off" /></td>'
@@ -1804,7 +1912,7 @@
         + '</td></tr>';
     }).join('');
 
-    const colCount = 7 + customFields.length;
+    const colCount = 8 + customFields.length;
     const emptyHtml = '<tr><td colspan="' + colCount + '" class="es-table-empty es-scenario-empty">'
       + '<div class="es-empty-msg">还没有场景，可载入云表默认的 12 个标准场景（含 UT 阶段场景电流），也可以手动新增场景</div>'
       + '<div class="es-empty-actions">'
@@ -1990,6 +2098,13 @@
         window.ES_ENDURANCE_UI.render();
       });
     });
+    // 单场景续航：fx 打开专属公式编辑器（每场景一条独立公式，默认留空）
+    root.querySelectorAll('[data-es-singlelife-fx]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const target = project.scenarios.find((s) => s.id === btn.dataset.esSinglelifeFx);
+        if (target) openSingleLifeEditor(project, target);
+      });
+    });
     // 测试版本 / 更新日期：内联编辑最新一条测试记录。
     // 无记录且填写了内容才创建记录并立即落库；空值不产生空记录。
     function upsertLatestRecord(scenario) {
@@ -2103,7 +2218,7 @@
     } else {
       const created = {
         id: uid('sc'), name: trimmed, remark: '', standard: '',
-        customCurrent: '', fields: {}, records: [],
+        customCurrent: '', fields: {}, singleLife: '', records: [],
       };
       project.scenarios.push(created);
       project.models.forEach((model) => {
@@ -2152,6 +2267,81 @@
     scenario.records.sort((a, b) => String(a.date).localeCompare(String(b.date)));
     E.store.save();
     window.ES_ENDURANCE_UI.render();
+  }
+
+  // 单场景续航公式编辑器：每场景一条独立公式（默认留空），命名空间仅 电流 + 电池参数，无 A1 网格
+  const SINGLE_LIFE_INSERTS = ['电流', '场景电流', '可用容量', 'Typ', 'Min', '比例', '门限', 'IF(', 'ROUND(', 'POWER(', 'SQRT('];
+  function openSingleLifeEditor(project, scenario) {
+    const overlay = document.createElement('div');
+    overlay.className = 'es-formula-overlay';
+    overlay.innerHTML = '<div class="es-formula-dialog panel rounded-3xl">'
+      + '<div class="es-formula-head"><h4><span class="material-symbols-outlined">function</span>单场景续航 · <b>' + escapeHtml(scenario.name) + '</b></h4>'
+      + '<button type="button" class="es-icon-btn es-icon-danger" data-es-sl-close><span class="material-symbols-outlined">close</span></button></div>'
+      + '<p class="es-formula-sub">直接填数字，或以 <b>=</b> 开头编写公式；留空表示不计算。可命名引用 <b>电流</b>（本场景当前电流，mA）与电池参数（可用容量 / Typ / Min / 比例 / 门限 等）。常用写法：<b>=可用容量/电流</b>（容量 mAh ÷ 电流 mA = 小时）。</p>'
+      + '<textarea class="es-formula-input" rows="3" autocomplete="off"></textarea>'
+      + '<div class="es-formula-quick">' + SINGLE_LIFE_INSERTS.map((q) => '<button type="button" class="es-quick-chip" data-es-sl-insert="' + escapeHtml(q) + '">' + escapeHtml(q) + '</button>').join('') + '</div>'
+      + '<p class="es-formula-trial">试算：<span class="es-formula-trial-value">—</span></p>'
+      + '<div class="es-formula-foot">'
+      + '<button type="button" class="template-btn" data-es-sl-clear title="清空公式，恢复为不计算">清空</button>'
+      + '<div><button type="button" class="template-btn" data-es-sl-cancel>取消</button>'
+      + '<button type="button" class="template-btn template-btn-primary" data-es-sl-save>保存</button></div></div>'
+      + '</div>';
+    document.body.appendChild(overlay);
+    const textarea = overlay.querySelector('.es-formula-input');
+    const trialValue = overlay.querySelector('.es-formula-trial-value');
+    textarea.value = scenario.singleLife || '';
+
+    function close() { overlay.remove(); document.removeEventListener('keydown', onKey); }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    document.addEventListener('keydown', onKey);
+
+    function trial() {
+      const text = textarea.value.trim();
+      if (text === '') { trialValue.textContent = '不计算（空）'; trialValue.classList.remove('is-error'); return; }
+      const trialScenario = JSON.parse(JSON.stringify(scenario));
+      trialScenario.singleLife = text;
+      const r = E.evaluateSingleLife(project, trialScenario);
+      if (r.ok) {
+        trialValue.textContent = r.empty ? '不计算（空）' : fmt(r.value, 4);
+        trialValue.classList.remove('is-error');
+      } else {
+        trialValue.textContent = r.error;
+        trialValue.classList.add('is-error');
+      }
+    }
+    textarea.addEventListener('input', trial);
+    trial();
+
+    overlay.querySelector('[data-es-sl-close]').addEventListener('click', close);
+    overlay.querySelector('[data-es-sl-cancel]').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelectorAll('[data-es-sl-insert]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const piece = btn.dataset.esSlInsert;
+        const start = textarea.selectionStart || textarea.value.length;
+        const end = textarea.selectionEnd || textarea.value.length;
+        textarea.value = textarea.value.slice(0, start) + piece + textarea.value.slice(end);
+        textarea.focus();
+        textarea.selectionStart = textarea.selectionEnd = start + piece.length;
+        trial();
+      });
+    });
+    overlay.querySelector('[data-es-sl-clear]').addEventListener('click', () => { textarea.value = ''; trial(); });
+    overlay.querySelector('[data-es-sl-save]').addEventListener('click', async () => {
+      const text = textarea.value.trim();
+      if (text.charAt(0) === '=') {
+        const check = window.ES_FORMULA.checkSyntax(text.slice(1));
+        if (!check.ok) { await window.ES_MODAL.alert({ title: '公式语法错误', icon: 'error', message: check.error }); return; }
+      } else if (text !== '' && num(text) === null) {
+        await window.ES_MODAL.alert({ title: '无法保存', icon: 'error', message: '请输入数字，或以 = 开头的公式' });
+        return;
+      }
+      scenario.singleLife = text;
+      E.store.save();
+      close();
+      window.ES_ENDURANCE_UI.render();
+      window.ES_ENDURANCE_UI.refreshCompareQuiet && window.ES_ENDURANCE_UI.refreshCompareQuiet();
+    });
   }
 
   // 历史记录查看：居中弹窗 + 表格展示
@@ -2268,14 +2458,16 @@
     return '<span class="es-cell-value">' + fmt(r.value, 2) + '</span>';
   }
 
-  function formulaCellHtml(ev, model, desc, digits) {
+  function formulaCellHtml(ev, model, desc, digits, colspan) {
     const addr = E.addressOf(model, desc);
     const raw = getRaw(model, desc);
     const r = ev.result(desc);
     const isFormula = String(raw).trim().charAt(0) === '=';
-    const cls = 'es-formula-cell' + (isFormula ? ' is-formula' : '') + (!r.ok ? ' is-error' : '');
+    const spanAttr = colspan ? ' colspan="' + colspan + '"' : '';
+    const mergeCls = colspan ? ' es-dou-merge' : '';
+    const cls = 'es-formula-cell' + mergeCls + (isFormula ? ' is-formula' : '') + (!r.ok ? ' is-error' : '');
     const text = !r.ok ? r.error : (r.empty ? '—' : fmt(r.value, digits === undefined ? 2 : digits));
-    return '<td class="' + cls + '" title="地址 ' + escapeHtml(addr) + '，点击 fx 编辑公式 / 数值">'
+    return '<td' + spanAttr + ' class="' + cls + '" title="地址 ' + escapeHtml(addr) + '，点击 fx 编辑公式 / 数值">'
       + '<span class="es-cell-text' + (!r.ok ? ' es-cell-text-error' : '') + '">' + escapeHtml(text) + '</span>'
       + '<button type="button" class="es-fx-btn" data-es-fx="' + escapeHtml(descKey(desc)) + '" title="编辑 ' + escapeHtml(addr) + '">fx</button></td>';
   }
@@ -2289,36 +2481,35 @@
     const colEl = (role, cls) => '<col class="' + cls + '" data-col-role="' + role
       + '" style="width:' + layout.colWidths[role] + 'px; min-width:' + layout.colWidths[role] + 'px" />';
 
-    // Excel 风格列标行：A=场景；电流 / 备注为展示列不占公式地址；模型对比列从 B/C 开始；每列右缘带拖拽手柄
+    // Excel 风格列标行（v3 连续地址，无空白列）：A=场景、B=电流；每个模型模块按时长 / 耗电 / 备注连续给字母
     const resizeHandle = (role) => '<span class="es-col-resize" data-col-role="' + role
       + '" title="拖拽调整列宽，双击恢复默认"></span>';
     const colBar = '<tr class="es-excel-colbar">'
       + '<th class="es-excel-rowhead"></th>'
       + '<th class="es-excel-colhead">' + resizeHandle('scenario') + 'A</th>'
-      + '<th class="es-excel-colhead es-excel-noaddr">' + resizeHandle('current') + '</th>'
-      + '<th class="es-excel-colhead es-excel-noaddr">' + resizeHandle('note') + '</th>'
+      + '<th class="es-excel-colhead">' + resizeHandle('current') + 'B</th>'
       + model.columns.map((col, ci) => {
         const dLetter = E.colLetterFor(ci, 'd');
         const mLetter = E.colLetterFor(ci, 'm');
-        return '<th class="es-excel-colhead">' + resizeHandle('duration') + dLetter
-          + '</th><th class="es-excel-colhead">' + resizeHandle('mah') + mLetter + '</th>';
+        const nLetter = E.noteLetterFor(ci);
+        return '<th class="es-excel-colhead">' + resizeHandle('duration') + dLetter + '</th>'
+          + '<th class="es-excel-colhead">' + resizeHandle('mah') + mLetter + '</th>'
+          + '<th class="es-excel-colhead">' + resizeHandle('note') + nLetter + '</th>';
       }).join('')
       + '</tr>';
 
     // colgroup 精确控宽（table-layout:fixed 下列标行与数据行严格对齐）：
-    // 行号 / 场景(A) / 电流 / 备注(C) + 每个对比列的时长·耗电；宽度来自布局偏好，用户拖拽后持久化
+    // 行号 / 场景(A) / 电流(B) + 每个模型模块的 时长·耗电·备注；宽度来自布局偏好，用户拖拽后持久化
     const colGroup = '<colgroup>' + colEl('rownum', 'es-col-rownum') + colEl('scenario', 'es-col-scenario')
       + colEl('current', 'es-col-current')
-      + colEl('note', 'es-col-note')
-      + model.columns.map(() => colEl('duration', 'es-col-duration') + colEl('mah', 'es-col-mah')).join('')
+      + model.columns.map(() => colEl('duration', 'es-col-duration') + colEl('mah', 'es-col-mah') + colEl('note', 'es-col-note')).join('')
       + '</colgroup>';
     // 表格显式宽度 = 各列宽之和：fixed 布局下严格按设定列宽渲染、不被内容撑宽，也不撑满容器
     const tableWidth = layout.colWidths.rownum + layout.colWidths.scenario + layout.colWidths.current
-      + model.columns.length * (layout.colWidths.duration + layout.colWidths.mah)
-      + layout.colWidths.note;
+      + model.columns.length * (layout.colWidths.duration + layout.colWidths.mah + layout.colWidths.note);
 
-    // 两行表头：行号 / 场景 / 电流 / 备注 均跨 3 行，备注紧随电流位于 C 列，模型列在其右侧连续排列
-    const headTop = '<th class="es-corner es-excel-rowhead" rowspan="3" title="行号（公式地址中的行，如 B2）"></th><th class="es-corner" rowspan="3">场景</th><th rowspan="3">电流 mA</th><th class="es-corner es-note-head" rowspan="3" title="本行场景的备注 / 说明，不参与公式计算">备注/说明</th>'
+    // 两行分组表头：行号 / 场景 / 电流 跨 2 行；每个模型模块 colspan=3（时长 / 耗电量 / 备注）
+    const headTop = '<th class="es-corner es-excel-rowhead" rowspan="2" title="行号（公式地址中的行，如 C2）"></th><th class="es-corner" rowspan="2">场景</th><th rowspan="2">电流 mA</th>'
       + model.columns.map((col, ci) => {
         const tag = col.kind === 'full' ? '<em class="es-mode-tag">满电</em>' : '';
         const win = col.window ? '<small>' + escapeHtml(col.window) + '</small>' : '';
@@ -2331,18 +2522,17 @@
           + '</span>';
         const dLetter = E.colLetterFor(ci, 'd');
         const mLetter = E.colLetterFor(ci, 'm');
-        return '<th class="es-mode-head" colspan="2"><div class="es-mode-title">' + escapeHtml(col.name) + tag + ops + '</div>'
-          + '<small class="es-col-addr">时长列 ' + dLetter + ' / 耗电列 ' + mLetter + '</small>' + win + need + note + '</th>';
+        const nLetter = E.noteLetterFor(ci);
+        return '<th class="es-mode-head" colspan="3"><div class="es-mode-title">' + escapeHtml(col.name) + tag + ops + '</div>'
+          + '<small class="es-col-addr">时长 ' + dLetter + ' / 耗电 ' + mLetter + ' / 备注 ' + nLetter + '</small>' + win + need + note + '</th>';
       }).join('');
-    const headSub = model.columns.map(() => '<th class="es-sub">时长 h</th><th class="es-sub">耗电量 mAh</th>').join('');
+    const headSub = model.columns.map(() => '<th class="es-sub">时长 h</th><th class="es-sub">耗电量 mAh</th><th class="es-sub es-note-sub" title="本行场景的备注 / 说明，不参与公式计算">备注/说明</th>').join('');
 
     const body = model.rows.map((row, rowIndex) => {
       const scenario = project.scenarios.find((s) => s.id === row.scenarioId);
       const scenarioName = scenario ? scenario.name : '（场景已删除）';
       const current = scenario ? E.scenarioCurrent(project, scenario.id) : null;
-      const noteCell = '<td class="es-note-cell"><input type="text" class="es-note-input" data-es-row-note="'
-        + escapeHtml(row.id) + '" value="' + escapeHtml(row.note || '') + '" placeholder="备注/说明" autocomplete="off" /></td>';
-      const cells = model.columns.map((col, ci) => {
+      const cells = model.columns.map((col) => {
         const cell = row.cells[col.id] || { d: '', m: E.DEFAULT_MAH_FORMULA };
         const dDesc = { kind: 'cell', rowId: row.id, colId: col.id, t: 'd' };
         const mDesc = { kind: 'cell', rowId: row.id, colId: col.id, t: 'm' };
@@ -2357,29 +2547,33 @@
           + '<small class="es-formula-result' + (dInvalid ? ' is-error' : '') + '"' + (isFormulaD ? '' : ' hidden') + '>'
           + (isFormulaD ? (dInvalid ? escapeHtml(dResult.error) : fmt(dResult.value, 2)) : '') + '</small>'
           + '</td>';
-        return dInput + formulaCellHtml(ev, model, mDesc);
+        const noteCell = '<td class="es-note-cell"><input type="text" class="es-note-input" data-es-row-note="'
+          + escapeHtml(row.id) + '" value="' + escapeHtml(row.note || '') + '" placeholder="备注/说明" autocomplete="off" /></td>';
+        return dInput + formulaCellHtml(ev, model, mDesc) + noteCell;
       }).join('');
       return '<tr data-es-model-row="' + escapeHtml(row.id) + '"><th class="es-excel-rownum" title="行号（公式地址中的行）">' + E.rowNumberFor(rowIndex) + '</th><td class="es-sc-name" title="' + escapeHtml(scenarioName) + '">' + escapeHtml(scenarioName) + '</td>'
-        + '<td class="es-current-cell">' + (current === null ? '—' : fmt(current, 2)) + '</td>' + noteCell + cells + '</tr>';
+        + '<td class="es-current-cell">' + (current === null ? '—' : fmt(current, 2)) + '</td>' + cells + '</tr>';
     }).join('');
 
     // tfoot：总时长/总耗电（可编辑公式）、平均电流（自动）、可使用时长 Typ/Min（可编辑公式）
-    // 列顺序与表体对齐：标签 / 电流留空 / 备注留空 / 各模型时长·耗电；汇总行电流列不展示
-    const statBlankNote = '<td class="es-stat-blank"></td>';
-    const totalRowHtml = '<tr class="es-stat-row"><th class="es-excel-rownum">' + E.totalRowNumber(model) + '</th><td>Total（可编辑公式）</td><td class="es-stat-current-blank" title="汇总行不展示电流；时长与耗电量均为 SUM"></td>' + statBlankNote
+    // 列顺序与表体对齐：行号 / 标签 / 电流留空，其后每个模型模块占 时长·耗电·备注 三列；汇总行电流列不展示
+    const statBlankNote = '<td class="es-stat-blank" title="备注/说明不参与汇总"></td>';
+    const totalRowHtml = '<tr class="es-stat-row"><th class="es-excel-rownum">' + E.totalRowNumber(model) + '</th><td>Total（可编辑公式）</td><td class="es-stat-current-blank" title="汇总行不展示电流；时长与耗电量均为 SUM"></td>'
       + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'td' }, 2)
-        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'tm' }, 2)).join('') + '</tr>';
+        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'tm' }, 2)
+        + statBlankNote).join('') + '</tr>';
 
-    const avgRow = '<tr class="es-stat-row es-stat-auto"><th class="es-excel-rownum es-excel-noaddr"></th><td>平均电流 mA（自动）</td><td class="es-stat-current-blank"></td>' + statBlankNote
+    const avgRow = '<tr class="es-stat-row es-stat-auto"><th class="es-excel-rownum es-excel-noaddr"></th><td>平均电流 mA（自动）</td><td class="es-stat-current-blank"></td>'
       + model.columns.map((col) => {
         const s = ev.stats[col.id] || {};
-        return '<td colspan="2" class="es-stat-mah">' + (s.avgCurrent === null ? '—' : fmt(s.avgCurrent, 2)) + '</td>';
+        return '<td colspan="2" class="es-stat-mah es-dou-merge">' + (s.avgCurrent === null ? '—' : fmt(s.avgCurrent, 2)) + '</td>' + statBlankNote;
       }).join('') + '</tr>';
 
+    // 可使用时长 Typ/Min：每模型跨 时长+耗电 两列合并展示，备注列留空
     const douRow = (label, cellType, withRowNum) => '<tr class="es-stat-row"><th class="es-excel-rownum' + (withRowNum ? '' : ' es-excel-noaddr') + '">'
-      + (withRowNum ? E.douRowNumber(model) : '') + '</th><td>' + label + '</td><td class="es-stat-current-blank"></td>' + statBlankNote
-      + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: cellType }, 2)
-        + '<td class="es-stat-blank"></td>').join('') + '</tr>';
+      + (withRowNum ? E.douRowNumber(model) : '') + '</th><td>' + label + '</td><td class="es-stat-current-blank"></td>'
+      + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: cellType }, 2, 2)
+        + statBlankNote).join('') + '</tr>';
 
     const totals = totalRowHtml + avgRow
       + douRow('可使用时长（Typ）h', 'douTyp', true)
@@ -2404,7 +2598,7 @@
       + '<div class="es-model-table-wrap"><table class="es-model-table es-excel-grid" data-row-height="' + layout.rowHeight
       + '" style="width:' + tableWidth + 'px; min-width:' + tableWidth + 'px; --es-data-row-h:' + dataRowH
       + 'px; --es-foot-row-h:' + (dataRowH + 4) + 'px">' + colGroup + '<thead>' + colBar + '<tr>' + headTop + '</tr><tr>' + headSub + '</tr></thead>'
-      + '<tbody>' + (body || '<tr><td colspan="' + (4 + model.columns.length * 2) + '" class="es-table-empty">请先在上方「场景电流」中新增场景，或点工具栏「新增场景行」</td></tr>') + '</tbody>'
+      + '<tbody>' + (body || '<tr><td colspan="' + (3 + model.columns.length * 3) + '" class="es-table-empty">请先在上方「场景电流」中新增场景，或点工具栏「新增场景行」</td></tr>') + '</tbody>'
       + '<tfoot>' + totals + '</tfoot></table></div>'
       + '<p class="es-model-tip"><span class="material-symbols-outlined">info</span>'
       + '默认口径对齐云表：场景耗电 = 时长 × 场景电流（0 时长自动得 0）；可使用时长 = 可用容量（Typ × 可放电比例，不硬编码）÷ 总耗电 × 总时长。'
@@ -2554,7 +2748,9 @@
     // 列宽拖拽 / 双击恢复默认
     bindGridColumnResize();
 
-    // 备注/说明列：纯文本，实时写回模型行并保存，不参与公式、不重绘（保留输入焦点）
+    // 备注/说明列：纯文本，实时写回模型行并保存，不参与公式、不整卡重绘（保留输入焦点）。
+    // 备注为场景行级、与具体模型无关，同一行在各模型模块内的备注框共享同一份 row.note，
+    // 因此输入时同步同行其它备注框，避免一处编辑、其余框仍显示旧值。
     root.querySelectorAll('[data-es-row-note]').forEach((input) => {
       input.addEventListener('input', () => {
         const model = activeModel(project);
@@ -2562,6 +2758,9 @@
         const row = model.rows.find((r) => r.id === input.dataset.esRowNote);
         if (!row) return;
         row.note = input.value;
+        root.querySelectorAll('[data-es-row-note]').forEach((peer) => {
+          if (peer !== input && peer.dataset.esRowNote === input.dataset.esRowNote) peer.value = input.value;
+        });
         E.store.save();
       });
     });
@@ -2942,8 +3141,9 @@
       + '<h5>一、单元格地址（A1）</h5>'
       + '<p>A 列为场景名；第 1 行表头，场景行从第 2 行开始'
       + (model ? '（本表共 ' + n + ' 个场景行，Total 在第 ' + E.totalRowNumber(model) + ' 行，可使用时长在第 ' + E.douRowNumber(model) + ' 行）' : '') + '；'
-      + '第 1 个对比列占 B（时长）/ C（耗电），第 2 个占 D / E，依次类推。鼠标悬停单元格可见地址。'
-      + '表中「平均电流」为自动展示行，不占用公式地址；Typ / Min 两个可使用时长同处虚拟 DOU 行的时长 / 耗电子列。</p>'
+      + 'A=场景、B=电流，仅作展示、不支持裸地址引用；每个对比列占连续三列「时长 / 耗电 / 备注」，'
+      + '第 1 个对比列为 C（时长）/ D（耗电）/ E（备注），第 2 个为 F / G / H，依次类推；备注为文本、不参与公式。鼠标悬停单元格可见地址。'
+      + '表中「平均电流」为自动展示行，不占用公式地址；Typ / Min 两个可使用时长同处 DOU 行，分别按时长 / 耗电列地址引用。</p>'
       + '<h5>二、电池参数（随电池卡片实时联动，不硬编码容量）</h5>'
       + '<p><b>Typ</b> 电池容量 Typ；<b>Min</b> 电池容量 Min；<b>比例</b> 可放电容量比例(0.2C)（空值按 1）；<b>门限</b> 低电量门限（空值按 0）；'
       + '<b>可用容量</b> = Typ × 比例（即云表 239 的来源）；<b>折减容量</b> = Typ × 比例 × (1 − 门限)；<b>关机电压 / Wh / 电压</b>。</p>'
