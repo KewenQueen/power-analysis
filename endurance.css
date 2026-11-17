@@ -1278,7 +1278,8 @@ body.es-col-resizing * { user-select: none !important; }
   border-radius: 3px;
   font-weight: 800;
 }
-.es-excel-grid tr:hover .es-row-del-btn { display: inline-block; }
+.es-excel-grid tr:hover .es-row-del-btn,
+.es-excel-grid .es-excel-rownum.is-free-row .es-row-del-btn { display: inline-block; }
 .es-row-del-btn:hover { background: #fee2e2; }
 .es-rownum-num { font-weight: 800; }
 
@@ -1317,7 +1318,8 @@ body.es-col-resizing * { user-select: none !important; }
   font-size: .82rem;
   line-height: 1;
 }
-.es-excel-grid tr:hover .es-row-insert-btn { display: inline-block; }
+.es-excel-grid tr:hover .es-row-insert-btn,
+.es-excel-grid .es-excel-rownum.is-free-row .es-row-insert-btn { display: inline-block; }
 .es-row-insert-btn:hover { background: #dbeafe; }
 .es-excel-grid .is-editing .es-row-insert-btn,
 .es-excel-grid .is-editing .es-row-del-btn { display: none; }

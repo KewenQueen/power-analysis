@@ -79,8 +79,29 @@
       tm: '=SUM(本列耗电)',
       // avg 默认留空 → 渲染自动平均电流（总耗电 ÷ 总时长）；填入数字 / 公式后即被自定义覆盖
       avg: '',
+      // 汇总区备注列（E/H/K…）的四个物理格：各自独立，允许数字 / 文本 / 公式，不再渲染成不可编辑灰块
+      noteTotal: '',
+      noteAvg: '',
+      noteTyp: '',
+      noteMin: '',
+      // 平均/DOU 行的 C 列物理格：默认空白，但用户可自行写入数字 / 文本 / 公式
+      blankAvg: '',
+      blankTyp: '',
+      blankMin: '',
       douTyp: kind === 'full' ? '=Typ/总耗电*总时长' : '=可用容量/总耗电*总时长',
       douMin: kind === 'full' ? '=Min/总耗电*总时长' : '=Min*比例/总耗电*总时长',
+    };
+  }
+
+  function defaultModelFooter() {
+    return {
+      labels: {
+        total: 'Total（可编辑公式）',
+        avg: '平均电流 mA（自动）',
+        douTyp: '可使用时长（Typ）h',
+        douMin: '可使用时长（Min）h',
+      },
+      current: { total: '', avg: '', douTyp: '', douMin: '' },
     };
   }
 
@@ -103,7 +124,10 @@
       columns.forEach((col) => { cells[col.id] = { d: '0', m: DEFAULT_MAH_FORMULA }; });
       return { id: uid('mr'), scenarioId: scenario.id, label: '', currentRaw: '', note: '', cells: cells };
     });
-    return { v: 3, id: uid('m'), name: name, columns: columns, rows: rows, foot: foot };
+    return {
+      v: 3, footerVersion: 2, id: uid('m'), name: name, columns: columns, rows: rows,
+      foot: foot, footer: defaultModelFooter(),
+    };
   }
 
   // v1（纯时长矩阵）模型迁移为 v2 公式网格；保留原 mode id 以减少外部引用断裂
@@ -128,7 +152,10 @@
       });
       return { id: uid('mr'), scenarioId: oldRow.scenarioId, label: '', currentRaw: '', note: oldRow.note || '', cells: cells };
     });
-    return { v: 2, id: model.id, name: model.name, columns: columns, rows: rows, foot: foot };
+    return {
+      v: 2, footerVersion: 2, id: model.id, name: model.name, columns: columns, rows: rows,
+      foot: foot, footer: defaultModelFooter(),
+    };
   }
 
   // 云表 HrV2LC「续航模型」默认 12 场景及其场景电流（K 列，mA）
@@ -374,8 +401,40 @@
           if (!migrated.foot || typeof migrated.foot !== 'object') { migrated.foot = {}; changed = true; }
           (migrated.columns || []).forEach((col) => {
             if (!migrated.foot[col.id]) { migrated.foot[col.id] = defaultFoot(col.kind); changed = true; }
-            else if (!('avg' in migrated.foot[col.id])) { migrated.foot[col.id].avg = ''; changed = true; }
+            else {
+              if (!('avg' in migrated.foot[col.id])) { migrated.foot[col.id].avg = ''; changed = true; }
+              ['noteTotal', 'noteAvg', 'noteTyp', 'noteMin', 'blankAvg', 'blankTyp', 'blankMin'].forEach((key) => {
+                if (!(key in migrated.foot[col.id])) { migrated.foot[col.id][key] = ''; changed = true; }
+              });
+            }
           });
+          const defaultFooter = defaultModelFooter();
+          if (!migrated.footer || typeof migrated.footer !== 'object') {
+            migrated.footer = defaultFooter;
+            changed = true;
+          } else {
+            if (!migrated.footer.labels || typeof migrated.footer.labels !== 'object') {
+              migrated.footer.labels = { ...defaultFooter.labels };
+              changed = true;
+            } else {
+              Object.keys(defaultFooter.labels).forEach((key) => {
+                if (!(key in migrated.footer.labels)) { migrated.footer.labels[key] = defaultFooter.labels[key]; changed = true; }
+              });
+            }
+            if (!migrated.footer.current || typeof migrated.footer.current !== 'object') {
+              migrated.footer.current = { ...defaultFooter.current };
+              changed = true;
+            } else {
+              Object.keys(defaultFooter.current).forEach((key) => {
+                if (!(key in migrated.footer.current)) { migrated.footer.current[key] = ''; changed = true; }
+              });
+            }
+          }
+          if (migrated.footerVersion !== 2) {
+            migrateFooterAddressesV52ToV53(migrated);
+            migrated.footerVersion = 2;
+            changed = true;
+          }
           return migrated;
         });
       } else {
@@ -715,7 +774,7 @@
   // ---------- A1 网格映射（v3：物理列与公式地址统一，列标连续无空白）----------
   // 物理/公式列：1=A 场景名，2=B 电流；第 i 个对比列（0-based）模块占三列：
   //   时长列 (3+3i) / 耗电列 (4+3i) / 备注列 (5+3i，可被引用，文本参与数值运算时记 #VALUE!)。
-  // 第 1 行表头，场景行从第 2 行开始，其后依次为 Total 行、DOU 行。
+  // 第 1 行表头，场景行从第 2 行开始，其后依次为 Total、平均电流、Typ、Min 四个连续汇总行。
   function colLetterFor(colIndex, cellType) {
     return window.ES_FORMULA.colToLetter(3 + colIndex * 3 + (cellType === 'm' ? 1 : 0));
   }
@@ -725,7 +784,15 @@
   }
   function rowNumberFor(rowIndex) { return 2 + rowIndex; }
   function totalRowNumber(model) { return 2 + model.rows.length; }
-  function douRowNumber(model) { return 3 + model.rows.length; }
+  function avgRowNumber(model) { return 3 + model.rows.length; }
+  function douRowNumber(model) { return 4 + model.rows.length; } // Typ 行
+  function douMinRowNumber(model) { return 5 + model.rows.length; }
+  function footerRowNumber(model, rowKey) {
+    if (rowKey === 'total') return totalRowNumber(model);
+    if (rowKey === 'avg') return avgRowNumber(model);
+    if (rowKey === 'douMin') return douMinRowNumber(model);
+    return douRowNumber(model);
+  }
   function addressOf(model, desc) {
     if (desc.kind === 'current') {
       const rowIndex = model.rows.findIndex((r) => r.id === desc.rowId);
@@ -736,14 +803,25 @@
       const rowIndex = model.rows.findIndex((r) => r.id === desc.rowId);
       return (colIndex < 0 || rowIndex < 0) ? '' : noteLetterFor(colIndex) + rowNumberFor(rowIndex);
     }
+    if (desc.kind === 'footerLabel') return 'A' + footerRowNumber(model, desc.rowKey);
+    if (desc.kind === 'footerCurrent') return 'B' + footerRowNumber(model, desc.rowKey);
     const colIndex = model.columns.findIndex((c) => c.id === desc.colId);
     if (colIndex < 0) return '';
     if (desc.kind === 'cell') {
       const rowIndex = model.rows.findIndex((r) => r.id === desc.rowId);
       return colLetterFor(colIndex, desc.t) + rowNumberFor(rowIndex);
     }
-    const row = desc.t === 'td' || desc.t === 'tm' ? totalRowNumber(model) : douRowNumber(model);
-    return colLetterFor(colIndex, desc.t === 'td' || desc.t === 'douTyp' ? 'd' : 'm') + row;
+    const footRowKey = {
+      td: 'total', tm: 'total', noteTotal: 'total',
+      blankAvg: 'avg', avg: 'avg', noteAvg: 'avg',
+      blankTyp: 'douTyp', douTyp: 'douTyp', noteTyp: 'douTyp',
+      blankMin: 'douMin', douMin: 'douMin', noteMin: 'douMin',
+    }[desc.t];
+    if (!footRowKey) return '';
+    const row = footerRowNumber(model, footRowKey);
+    if (desc.t.indexOf('note') === 0) return noteLetterFor(colIndex) + row;
+    const isDuration = desc.t === 'td' || desc.t.indexOf('blank') === 0;
+    return colLetterFor(colIndex, isDuration ? 'd' : 'm') + row;
   }
 
   // ---------- 旧地址（v2）→ 新地址（v3）迁移 ----------
@@ -781,8 +859,16 @@
     });
     Object.keys(model.foot || {}).forEach((colId) => {
       const f = model.foot[colId];
-      if (f) ['td', 'tm', 'douTyp', 'douMin'].forEach((k) => { if (typeof f[k] === 'string') f[k] = walk(f[k]); });
+      if (f) ['td', 'tm', 'avg', 'noteTotal', 'noteAvg', 'noteTyp', 'noteMin', 'blankAvg', 'blankTyp', 'blankMin', 'douTyp', 'douMin'].forEach((k) => { if (typeof f[k] === 'string') f[k] = walk(f[k]); });
     });
+    if (model.footer) {
+      Object.keys(model.footer.labels || {}).forEach((k) => {
+        if (typeof model.footer.labels[k] === 'string') model.footer.labels[k] = walk(model.footer.labels[k]);
+      });
+      Object.keys(model.footer.current || {}).forEach((k) => {
+        if (typeof model.footer.current[k] === 'string') model.footer.current[k] = walk(model.footer.current[k]);
+      });
+    }
     model.v = 3;
     return model;
   }
@@ -813,8 +899,16 @@
     });
     Object.keys(model.foot || {}).forEach((colId) => {
       const f = model.foot[colId];
-      if (f) ['td', 'tm', 'avg', 'douTyp', 'douMin'].forEach((k) => { if (typeof f[k] === 'string') f[k] = walker(f[k]); });
+      if (f) ['td', 'tm', 'avg', 'noteTotal', 'noteAvg', 'noteTyp', 'noteMin', 'blankAvg', 'blankTyp', 'blankMin', 'douTyp', 'douMin'].forEach((k) => { if (typeof f[k] === 'string') f[k] = walker(f[k]); });
     });
+    if (model.footer) {
+      Object.values(model.footer.labels || {}).forEach((v, i) => {
+        if (typeof v === 'string') model.footer.labels[Object.keys(model.footer.labels)[i]] = walker(v);
+      });
+      Object.values(model.footer.current || {}).forEach((v, i) => {
+        if (typeof v === 'string') model.footer.current[Object.keys(model.footer.current)[i]] = walker(v);
+      });
+    }
   }
   // 删除第 deletedDataIndex 个数据行（0-based）后：
   //   指向被删行 → (1/0)；指向其下方的行号整体 -1；上方不动。列字母保持不变。
@@ -835,6 +929,20 @@
       return ref;
     }));
   }
+  // v52 → v53 汇总区物理地址迁移：
+  // 旧：Total=n+2，DOU 虚拟行=n+3（C=Typ、D=Min、E 不可用）；新：Total=n+2、平均=n+3、Typ=n+4、Min=n+5。
+  function migrateFooterAddressesV52ToV53(model) {
+    const oldDouRow = model.rows.length + 3;
+    walkModelFormulaRaws(model, (raw) => rewriteA1Tokens(raw, (ref) => {
+      if (ref.col === 1 || ref.col === 2) return ref.row === oldDouRow ? null : ref; // 旧 A/B 汇总格无有效值
+      if (ref.row < oldDouRow) return ref;
+      if (ref.row > oldDouRow) return { col: ref.col, row: ref.row + 2 };
+      const offset = (ref.col - 3) % 3; // 模块列：C/F/I=0，D/G/J=1，E/H/K=2
+      if (offset === 0) return { col: ref.col + 1, row: oldDouRow + 1 }; // 旧 Typ C15 → 新 D16
+      if (offset === 1) return { col: ref.col, row: oldDouRow + 2 };     // 旧 Min D15 → 新 D17
+      return null;                                                         // 旧 E15 原本不可引用
+    }));
+  }
   // 删除第 moduleIndex 个对比列模块（每个模块占 3 个物理列：时长/耗电/备注）后：
   //   指向被删模块三列 → (1/0)；指向其右侧模块的列整体 -3；左侧不动。行号保持不变。
   function rewriteRefsAfterModuleDelete(model, moduleIndex) {
@@ -851,6 +959,14 @@
     const cells = {};
     (model.columns || []).forEach((col) => { cells[col.id] = { d: '', m: '' }; });
     return { id: uid('mr'), scenarioId: null, label: '', note: '', currentRaw: '', cells: cells };
+  }
+  // 新增场景行：汇总区会整体下推一行，先平移 A1 引用，再追加默认时长/耗电公式。
+  function appendRowForScenario(model, scenarioId) {
+    if (model.rows.some((r) => r.scenarioId === scenarioId)) return;
+    rewriteRefsAfterRowInsert(model, model.rows.length);
+    const cells = {};
+    model.columns.forEach((col) => { cells[col.id] = { d: '0', m: DEFAULT_MAH_FORMULA }; });
+    model.rows.push({ id: uid('mr'), scenarioId: scenarioId, label: '', currentRaw: '', note: '', cells: cells });
   }
 
   // 电池参数命名表：供 DOU 网格与单场景续航公式共用，随电池卡片实时联动、不硬编码容量。
@@ -919,22 +1035,28 @@
     const cache = new Map();
     const n = model.rows.length;
     const totalRow = totalRowNumber(model);
+    const avgRow = avgRowNumber(model);
     const douRow = douRowNumber(model);
+    const minRow = douMinRowNumber(model);
 
     function keyOf(desc) {
-      return desc.kind + '|' + (desc.rowId || '') + '|' + desc.colId + '|' + desc.t;
+      return desc.kind + '|' + (desc.rowId || desc.rowKey || '') + '|' + desc.colId + '|' + (desc.t || '');
     }
 
     // A1 地址 -> 单元格描述（v3 连续地址；v52 起 B 电流、备注列也可被引用）
     // col1=A 场景名（文本标签，不参与公式），col2=B 电流（自由：数字/文字/公式），
     // 模型模块 i 占 3+3i 起三列：时长 / 耗电 / 备注（备注可引用，文本在数值运算中记 #VALUE!）。
     function refToDesc(ref) {
-      if (ref.col === 2) {
-        // B 电流列：仅数据行有电流，Total / DOU 行无 B 值
-        if (ref.row >= 2 && ref.row <= 1 + n) return { kind: 'current', rowId: model.rows[ref.row - 2].id };
-        return null;
+      if (ref.col === 1) {
+        const footerKey = { [totalRow]: 'total', [avgRow]: 'avg', [douRow]: 'douTyp', [minRow]: 'douMin' }[ref.row];
+        return footerKey ? { kind: 'footerLabel', rowKey: footerKey } : null;
       }
-      if (ref.col < 3) return null; // A 场景名为文本标签，不参与公式
+      if (ref.col === 2) {
+        // B 电流列：数据行为场景/自由行电流；四个汇总行也各自可编辑
+        if (ref.row >= 2 && ref.row <= 1 + n) return { kind: 'current', rowId: model.rows[ref.row - 2].id };
+        const footerKey = { [totalRow]: 'total', [avgRow]: 'avg', [douRow]: 'douTyp', [minRow]: 'douMin' }[ref.row];
+        return footerKey ? { kind: 'footerCurrent', rowKey: footerKey } : null;
+      }
       const offset = (ref.col - 3) % 3;
       const ci = Math.floor((ref.col - 3) / 3);
       if (ci >= model.columns.length) return null;
@@ -944,11 +1066,13 @@
         if (offset === 2) return { kind: 'note', rowId: row.id, colId: colId }; // 备注列（可引用）
         return { kind: 'cell', rowId: row.id, colId: colId, t: offset === 1 ? 'm' : 'd' };
       }
-      if (offset === 2) return null; // Total / DOU 行没有备注汇总
-      const isM = offset === 1;
-      if (ref.row === totalRow) return { kind: 'foot', colId: colId, t: isM ? 'tm' : 'td' };
-      if (ref.row === douRow) return { kind: 'foot', colId: colId, t: isM ? 'douMin' : 'douTyp' };
-      return null;
+      const footerTypes = {
+        [totalRow]: ['td', 'tm', 'noteTotal'],
+        [avgRow]: ['blankAvg', 'avg', 'noteAvg'],
+        [douRow]: ['blankTyp', 'douTyp', 'noteTyp'],
+        [minRow]: ['blankMin', 'douMin', 'noteMin'],
+      };
+      return footerTypes[ref.row] ? { kind: 'foot', colId: colId, t: footerTypes[ref.row][offset] } : null;
     }
 
     function evalCell(desc, visiting) {
@@ -962,6 +1086,10 @@
       if (desc.kind === 'current' || desc.kind === 'note') {
         scopeRow = model.rows.find((r) => r.id === desc.rowId) || null;
         raw = scopeRow ? (desc.kind === 'current' ? (scopeRow.currentRaw || '') : (scopeRow.note || '')) : '';
+      } else if (desc.kind === 'footerLabel') {
+        raw = (model.footer && model.footer.labels && model.footer.labels[desc.rowKey]) || '';
+      } else if (desc.kind === 'footerCurrent') {
+        raw = (model.footer && model.footer.current && model.footer.current[desc.rowKey]) || '';
       } else if (desc.kind === 'cell') {
         const row = model.rows.find((r) => r.id === desc.rowId);
         const cell = row && row.cells[desc.colId];
@@ -972,7 +1100,14 @@
       }
 
       let result;
-      if (desc.kind === 'current' && String(raw).trim() === '') {
+      if (desc.kind === 'foot' && desc.t === 'avg' && String(raw).trim() === '') {
+        // 平均电流留空时，UI 显示自动值；A1 引用也必须得到同一个自动值，避免“看得见但公式引用不到”。
+        const tdResult = evalCell({ kind: 'foot', colId: desc.colId, t: 'td' }, visiting);
+        const tmResult = evalCell({ kind: 'foot', colId: desc.colId, t: 'tm' }, visiting);
+        const canAuto = tdResult.ok && !tdResult.empty && tdResult.value !== 0
+          && tmResult.ok && !tmResult.empty;
+        result = canAuto ? { ok: true, value: tmResult.value / tdResult.value } : { ok: true, empty: true, value: null };
+      } else if (desc.kind === 'current' && String(raw).trim() === '') {
         // B 电流留空：回退到场景共享电流（自定义电流优先，否则最新测试记录），与「电流」命名口径一致
         const fallback = scopeRow ? scenarioCurrent(project, scopeRow.scenarioId) : null;
         result = fallback === null ? { ok: true, empty: true, value: null } : { ok: true, value: fallback };
@@ -999,7 +1134,6 @@
     }
 
     function makeCtx(desc, scopeRow, visiting) {
-      const colIndex = model.columns.findIndex((c) => c.id === desc.colId);
       const names = batteryNameValues(project);
 
       function rowResult(row, cellType) {
@@ -1079,11 +1213,11 @@
       const tm = evalCell({ kind: 'foot', colId: col.id, t: 'tm' }, {});
       const douTyp = evalCell({ kind: 'foot', colId: col.id, t: 'douTyp' }, {});
       const douMin = evalCell({ kind: 'foot', colId: col.id, t: 'douMin' }, {});
-      // 平均电流仅在用户自定义（foot.avg 非空）时进入公式求值；留空则由 stats.avgCurrent 自动给出
-      const avgRaw = (model.foot[col.id] || {}).avg;
-      if (avgRaw !== undefined && String(avgRaw).trim() !== '') {
-        evalCell({ kind: 'foot', colId: col.id, t: 'avg' }, {});
-      }
+      // 平均电流留空时也预热：结果为自动总耗电 / 总时长，保证 A1 引用与界面显示一致。
+      evalCell({ kind: 'foot', colId: col.id, t: 'avg' }, {});
+      ['noteTotal', 'noteAvg', 'noteTyp', 'noteMin', 'blankAvg', 'blankTyp', 'blankMin'].forEach((t) => {
+        evalCell({ kind: 'foot', colId: col.id, t: t }, {});
+      });
       const totalHours = td.ok ? td.value : null;
       const totalMah = tm.ok ? tm.value : null;
       stats[col.id] = {
@@ -1097,6 +1231,10 @@
         tdError: td.ok ? null : td.error,
         tmError: tm.ok ? null : tm.error,
       };
+    });
+    ['total', 'avg', 'douTyp', 'douMin'].forEach((rowKey) => {
+      evalCell({ kind: 'footerLabel', rowKey }, {});
+      evalCell({ kind: 'footerCurrent', rowKey }, {});
     });
     model.rows.forEach((row) => {
       evalCell({ kind: 'current', rowId: row.id }, {}); // 预热 B 电流（含留空回退），供网格直接 result()
@@ -1144,16 +1282,17 @@
     store, defaultBattery, latestRecord, scenarioCurrent,
     computeModeStats, computeModelStats, evaluateModel, evaluateSingleLife,
     sortDischargeTable, lookupDischargeCapacity, deriveDischargeRatio,
-    DEFAULT_MAH_FORMULA, defaultFoot, createColumn, createModelV2, migrateModelV1,
+    DEFAULT_MAH_FORMULA, defaultFoot, defaultModelFooter, createColumn, createModelV2, migrateModelV1,
     defaultScenarioDefs, buildDefaultScenarios, mergeDefaultScenarios, currentCompare,
     sanitizeFileName, fileTimestamp, buildProjectExport, parseProjectImport,
     isValidProjectShape, uniqueProjectName, reidentifyProject, downloadTextFile,
     GRID_LAYOUT_KEY, GRID_COL_ROLES, GRID_ROW_H, GRID_DEFAULT_ROWH,
     defaultGridLayout, loadGridLayout, saveGridLayout, resetGridLayout, clampGridColWidth,
-    colLetterFor, noteLetterFor, rowNumberFor, totalRowNumber, douRowNumber, addressOf,
-    remapLegacyCol, remapFormulaRefs, migrateModelAddressesV2ToV3, normalizeData,
+    colLetterFor, noteLetterFor, rowNumberFor, totalRowNumber, avgRowNumber, douRowNumber, douMinRowNumber,
+    footerRowNumber, addressOf,
+    remapLegacyCol, remapFormulaRefs, migrateModelAddressesV2ToV3, migrateFooterAddressesV52ToV53, normalizeData,
     rewriteA1Tokens, rewriteRefsAfterRowDelete, rewriteRefsAfterRowInsert,
-    rewriteRefsAfterModuleDelete, createBlankRow,
+    rewriteRefsAfterModuleDelete, createBlankRow, appendRowForScenario,
   };
 })();
 
@@ -2316,6 +2455,8 @@
     if (!ok) return;
     project.scenarios = project.scenarios.filter((s) => s.id !== id);
     project.models.forEach((model) => {
+      const rowIndex = model.rows.findIndex((r) => r.scenarioId === id);
+      if (rowIndex >= 0) E.rewriteRefsAfterRowDelete(model, rowIndex);
       model.rows = model.rows.filter((r) => r.scenarioId !== id);
     });
     E.store.save();
@@ -2343,11 +2484,7 @@
         customCurrent: '', fields: {}, singleLife: '', records: [],
       };
       project.scenarios.push(created);
-      project.models.forEach((model) => {
-        const cells = {};
-        model.columns.forEach((col) => { cells[col.id] = { d: '0', m: E.DEFAULT_MAH_FORMULA }; });
-        model.rows.push({ id: uid('mr'), scenarioId: created.id, label: '', currentRaw: '', note: '', cells: cells });
-      });
+      project.models.forEach((model) => E.appendRowForScenario(model, created.id));
     }
     E.store.save();
     window.ES_ENDURANCE_UI.render();
@@ -2534,6 +2671,13 @@
       const v = desc.kind === 'current' ? row.currentRaw : row.note;
       return v === undefined || v === null ? '' : String(v);
     }
+    if (desc.kind === 'footerLabel' || desc.kind === 'footerCurrent') {
+      const bucket = desc.kind === 'footerLabel'
+        ? (model.footer && model.footer.labels)
+        : (model.footer && model.footer.current);
+      const v = bucket ? bucket[desc.rowKey] : '';
+      return v === undefined || v === null ? '' : String(v);
+    }
     if (desc.kind === 'cell') {
       const row = model.rows.find((r) => r.id === desc.rowId);
       const cell = row && row.cells[desc.colId];
@@ -2546,6 +2690,13 @@
       const row = model.rows.find((r) => r.id === desc.rowId);
       if (!row) return;
       if (desc.kind === 'current') row.currentRaw = raw; else row.note = raw;
+      return;
+    }
+    if (desc.kind === 'footerLabel' || desc.kind === 'footerCurrent') {
+      if (!model.footer) model.footer = E.defaultModelFooter();
+      const bucketKey = desc.kind === 'footerLabel' ? 'labels' : 'current';
+      if (!model.footer[bucketKey]) model.footer[bucketKey] = E.defaultModelFooter()[bucketKey];
+      model.footer[bucketKey][desc.rowKey] = raw;
       return;
     }
     if (desc.kind === 'cell') {
@@ -2602,8 +2753,9 @@
     const showTextError = !r.ok && (isFormula || r.error !== '#VALUE!');
     const cls = 'es-formula-cell es-editable-cell' + mergeCls + (isFormula ? ' is-formula' : '') + (showTextError ? ' is-error' : '');
     const text = !r.ok ? (showTextError ? r.error : String(raw).trim()) : (r.empty ? '—' : fmt(r.value, digits === undefined ? 2 : digits));
+    const addrText = addr ? '地址 ' + addr + '：' : '汇总展示格（无固定 A1 地址）：';
     return '<td' + spanAttr + ' class="' + cls + '" data-es-cell="' + escapeHtml(descKey(desc))
-      + '" title="地址 ' + escapeHtml(addr) + '：点击直接编辑（数字 / 文字 / = 公式），fx 为高级试算编辑器">'
+      + '" title="' + escapeHtml(addrText) + '点击直接编辑（数字 / 文字 / = 公式），fx 为高级试算编辑器">'
       + '<span class="es-cell-text' + (showTextError ? ' es-cell-text-error' : '') + '">' + escapeHtml(text) + '</span>'
       + '<button type="button" class="es-fx-btn" data-es-fx="' + escapeHtml(descKey(desc)) + '" title="在公式编辑器中打开 ' + escapeHtml(addr) + '">fx</button></td>';
   }
@@ -2633,28 +2785,28 @@
       + '<button type="button" class="es-fx-btn" data-es-fx="' + escapeHtml(descKey(desc)) + '" title="编辑电流 ' + addr + '">fx</button></td>';
   }
 
-  // 平均电流格：foot.avg 留空时显示自动值（总耗电 ÷ 总时长），填入数字 / 公式后即被覆盖；同样支持就地编辑
-  function avgCellHtml(ev, model, col, statBlank) {
+  // 平均电流格：严格落在 D 列（耗电列）下方；foot.avg 留空时显示自动值，填入数字 / 公式后覆盖
+  function avgCellHtml(ev, model, col) {
     const desc = { kind: 'foot', colId: col.id, t: 'avg' };
     const raw = getRaw(model, desc);
     const trimmed = String(raw || '').trim();
     if (trimmed === '') {
       const auto = ev.stats[col.id] ? ev.stats[col.id].avgCurrent : null;
       const text = auto === null || auto === undefined ? '—' : fmt(auto, 2);
-      return '<td colspan="2" class="es-stat-mah es-dou-merge es-formula-cell es-editable-cell es-avg-auto" data-es-cell="'
+      return '<td class="es-stat-mah es-formula-cell es-editable-cell es-avg-auto" data-es-cell="'
         + escapeHtml(descKey(desc)) + '" title="平均电流（自动 = 总耗电 ÷ 总时长）；点击可改写为固定值或公式，留空恢复自动">'
         + '<span class="es-cell-text es-avg-auto-text">' + escapeHtml(text) + '</span>'
-        + '<button type="button" class="es-fx-btn" data-es-fx="' + escapeHtml(descKey(desc)) + '" title="自定义平均电流">fx</button></td>' + statBlank;
+        + '<button type="button" class="es-fx-btn" data-es-fx="' + escapeHtml(descKey(desc)) + '" title="自定义平均电流">fx</button></td>';
     }
     const r = ev.result(desc);
     const isFormula = trimmed.charAt(0) === '=';
     const showTextError = !r.ok && (isFormula || r.error !== '#VALUE!');
-    const cls = 'es-stat-mah es-dou-merge es-formula-cell es-editable-cell' + (isFormula ? ' is-formula' : '') + (showTextError ? ' is-error' : '');
+    const cls = 'es-stat-mah es-formula-cell es-editable-cell' + (isFormula ? ' is-formula' : '') + (showTextError ? ' is-error' : '');
     const text = !r.ok ? (showTextError ? r.error : trimmed) : (r.empty ? '—' : fmt(r.value, 2));
-    return '<td colspan="2" class="' + cls + '" data-es-cell="' + escapeHtml(descKey(desc))
+    return '<td class="' + cls + '" data-es-cell="' + escapeHtml(descKey(desc))
       + '" title="自定义平均电流：点击编辑（数字、文字或 = 公式），清空则恢复自动">'
       + '<span class="es-cell-text' + (showTextError ? ' es-cell-text-error' : '') + '">' + escapeHtml(text) + '</span>'
-      + '<button type="button" class="es-fx-btn" data-es-fx="' + escapeHtml(descKey(desc)) + '" title="编辑平均电流">fx</button></td>' + statBlank;
+      + '<button type="button" class="es-fx-btn" data-es-fx="' + escapeHtml(descKey(desc)) + '" title="编辑平均电流">fx</button></td>';
   }
 
   function renderModelBody(project, model) {
@@ -2740,7 +2892,7 @@
           + ' title="地址 ' + escapeHtml(nAddr) + '：自由文本或 = 公式，可被其它单元格按 A1 地址引用（文本参与数值运算时记 #VALUE!）" /></td>';
         return dInput + formulaCellHtml(ev, model, mDesc) + noteCell;
       }).join('');
-      const rowHead = '<th class="es-excel-rownum" title="行号（公式地址中的行）"><span class="es-rownum-num">' + E.rowNumberFor(rowIndex) + '</span>'
+      const rowHead = '<th class="es-excel-rownum' + (isBlankRow ? ' is-free-row' : '') + '" title="行号（公式地址中的行）"><span class="es-rownum-num">' + E.rowNumberFor(rowIndex) + '</span>'
         + '<button type="button" class="es-row-insert-btn" data-es-row-insert="' + escapeHtml(row.id)
         + '" title="在这一行上方插入空白自由行"><span class="material-symbols-outlined">add</span></button>'
         + '<button type="button" class="es-row-del-btn" data-es-row-delete="' + escapeHtml(row.id)
@@ -2753,26 +2905,33 @@
         + nameCell + currentCellHtml(ev, model, row, rowIndex) + cells + '</tr>';
     }).join('');
 
-    // tfoot：总时长/总耗电（可编辑公式）、平均电流（自动）、可使用时长 Typ/Min（可编辑公式）
-    // 列顺序与表体对齐：行号 / 标签 / 电流留空，其后每个模型模块占 时长·耗电·备注 三列；汇总行电流列不展示
-    const statBlankNote = '<td class="es-stat-blank" title="备注/说明不参与汇总"></td>';
-    const totalRowHtml = '<tr class="es-stat-row"><th class="es-excel-rownum">' + E.totalRowNumber(model) + '</th><td>Total（可编辑公式）</td><td class="es-stat-current-blank" title="汇总行不展示电流；时长与耗电量均为 SUM"></td>'
+    // tfoot：严格按物理列落格——A=标签、B=电流、C=时长、D=耗电/结果、E=备注；每个物理格都可编辑
+    const footerLabel = (rowKey) => formulaCellHtml(ev, model, { kind: 'footerLabel', rowKey }, 2);
+    const footerCurrent = (rowKey) => formulaCellHtml(ev, model, { kind: 'footerCurrent', rowKey }, 2);
+    const footerBlank = (col, t) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t }, 2);
+    const totalRowHtml = '<tr class="es-stat-row"><th class="es-excel-rownum">' + E.totalRowNumber(model) + '</th>'
+      + footerLabel('total') + footerCurrent('total')
       + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'td' }, 2)
         + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'tm' }, 2)
-        + statBlankNote).join('') + '</tr>';
+        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'noteTotal' }, 2)).join('') + '</tr>';
 
-    const avgRow = '<tr class="es-stat-row es-stat-auto"><th class="es-excel-rownum es-excel-noaddr"></th><td>平均电流 mA（自动）</td><td class="es-stat-current-blank"></td>'
-      + model.columns.map((col) => avgCellHtml(ev, model, col, statBlankNote)).join('') + '</tr>';
+    const avgRow = '<tr class="es-stat-row es-stat-auto"><th class="es-excel-rownum">' + E.avgRowNumber(model) + '</th>'
+      + footerLabel('avg') + footerCurrent('avg')
+      + model.columns.map((col) => footerBlank(col, 'blankAvg')
+        + avgCellHtml(ev, model, col)
+        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'noteAvg' }, 2)).join('') + '</tr>';
 
-    // 可使用时长 Typ/Min：每模型跨 时长+耗电 两列合并展示，备注列留空
-    const douRow = (label, cellType, withRowNum) => '<tr class="es-stat-row"><th class="es-excel-rownum' + (withRowNum ? '' : ' es-excel-noaddr') + '">'
-      + (withRowNum ? E.douRowNumber(model) : '') + '</th><td>' + label + '</td><td class="es-stat-current-blank"></td>'
-      + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: cellType }, 2, 2)
-        + statBlankNote).join('') + '</tr>';
+    // 可使用时长 Typ/Min：结果严格放在 D（耗电列）下方；C/E 也是独立可编辑物理格
+    const douRow = (rowKey, label, valueType, blankType, noteType) => '<tr class="es-stat-row"><th class="es-excel-rownum">'
+      + E.footerRowNumber(model, rowKey) + '</th>'
+      + footerLabel(rowKey) + footerCurrent(rowKey)
+      + model.columns.map((col) => footerBlank(col, blankType)
+        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: valueType }, 2)
+        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: noteType }, 2)).join('') + '</tr>';
 
     const totals = totalRowHtml + avgRow
-      + douRow('可使用时长（Typ）h', 'douTyp', true)
-      + douRow('可使用时长（Min）h', 'douMin', false);
+      + douRow('douTyp', '可使用时长（Typ）h', 'douTyp', 'blankTyp', 'noteTyp')
+      + douRow('douMin', '可使用时长（Min）h', 'douMin', 'blankMin', 'noteMin');
 
     const rowHeightBtn = (key, label) => '<button type="button" class="es-mini-btn es-rowh-btn'
       + (layout.rowHeight === key ? ' is-on' : '') + '" data-es-row-h="' + key + '">' + label + '</button>';
@@ -2798,9 +2957,9 @@
       + '<tfoot>' + totals + '</tfoot></table></div>'
       + '<p class="es-model-tip"><span class="material-symbols-outlined">info</span>'
       + '默认口径对齐云表：场景耗电 = 时长 × 场景电流（0 时长自动得 0）；可使用时长 = 可用容量（Typ × 可放电比例，不硬编码）÷ 总耗电 × 总时长。'
-      + '<b>数据格、场景/自由行标题与列名均可点按自由编辑</b>：数字、文字或 <b>=</b> 公式（回车 / 失焦保存、Esc 取消；文本格原样显示，参与数值计算时记 #VALUE!）；'
+      + '<b>数据格、汇总区每个物理格、场景/自由行标题与列名均可点按自由编辑</b>：数字、文字或 <b>=</b> 公式（回车 / 失焦保存、Esc 取消；文本格原样显示，参与数值计算时记 #VALUE!）；'
       + '<b>B 电流</b>可在本模型内改写为任意数字 / 文字 / 公式（留空回退场景共享电流，地址 B2、B3… 可被引用），<b>备注列</b>同样可被 A1 引用；'
-      + '工具栏可「插入空白行」做与场景无关的自由行；删除行 / 列时 A1 引用按 Excel 规则自动平移，指向被删区域的公式显式报错；行号上的 ✕ 删除该行，<b>fx</b> 为带试算的高级编辑器。</p>';
+      + '工具栏可「插入空白行」做与场景无关的自由行；自由行行号会常驻显示 + / ✕，可继续插入或直接删除；删除行 / 列时 A1 引用按 Excel 规则自动平移，指向被删区域的公式显式报错；<b>fx</b> 为带试算的高级编辑器。</p>';
   }
 
   // ---------- 就地刷新（保留输入焦点） ----------
@@ -2839,7 +2998,9 @@
     }
     const tfoot = root.querySelector('.es-model-table tfoot');
     if (tfoot) {
-      ['td', 'tm', 'douTyp', 'douMin'].forEach((t) => {
+      ['td', 'tm', 'douTyp', 'douMin',
+        'noteTotal', 'noteAvg', 'noteTyp', 'noteMin',
+        'blankAvg', 'blankTyp', 'blankMin'].forEach((t) => {
         model.columns.forEach((col) => {
           const desc = { kind: 'foot', colId: col.id, t: t };
           const cell = findFxCell(tfoot, desc);
@@ -2859,6 +3020,14 @@
         } else {
           paintFormulaCell(cell, ev.result(desc), rawAvg);
         }
+      });
+      ['total', 'avg', 'douTyp', 'douMin'].forEach((rowKey) => {
+        const labelDesc = { kind: 'footerLabel', rowKey };
+        const currentDesc = { kind: 'footerCurrent', rowKey };
+        const labelCell = findFxCell(tfoot, labelDesc);
+        const currentCell = findFxCell(tfoot, currentDesc);
+        if (labelCell) paintFormulaCell(labelCell, ev.result(labelDesc), getRaw(model, labelDesc));
+        if (currentCell) paintFormulaCell(currentCell, ev.result(currentDesc), getRaw(model, currentDesc));
       });
     }
   }
@@ -3189,22 +3358,15 @@
     if (values.scenario === NEW) {
       const created = await createScenarioInteractively(project);
       if (!created) return;
-      appendRowForScenario(model, created.id);
+      E.appendRowForScenario(model, created.id);
     } else {
-      appendRowForScenario(model, values.scenario);
+      E.appendRowForScenario(model, values.scenario);
     }
     E.store.save();
     window.ES_ENDURANCE_UI.render();
   }
 
-  function appendRowForScenario(model, scenarioId) {
-    if (model.rows.some((r) => r.scenarioId === scenarioId)) return;
-    const cells = {};
-    model.columns.forEach((col) => { cells[col.id] = { d: '0', m: E.DEFAULT_MAH_FORMULA }; });
-    model.rows.push({ id: uid('mr'), scenarioId: scenarioId, label: '', currentRaw: '', note: '', cells: cells });
-  }
-
-  // 自由空白行：先平移 A1 引用（含 Total / DOU 虚拟行），再插入，保证旧公式地址不失效。
+  // 自由空白行：先平移 A1 引用（含 Total / 平均 / DOU 汇总行），再插入，保证旧公式地址不失效。
   function appendBlankRow(model) {
     const insertIndex = model.rows.length;
     E.rewriteRefsAfterRowInsert(model, insertIndex);
@@ -3476,6 +3638,11 @@
     overlay.querySelector('[data-es-fx-reset]').addEventListener('click', () => {
       if (desc.kind === 'current' || desc.kind === 'note') {
         textarea.value = ''; // 自由电流 / 备注没有固定默认公式，恢复默认即清空（电流回退场景值）
+      } else if (desc.kind === 'footerLabel' || desc.kind === 'footerCurrent') {
+        const footerDefaults = E.defaultModelFooter();
+        textarea.value = desc.kind === 'footerLabel'
+          ? footerDefaults.labels[desc.rowKey]
+          : footerDefaults.current[desc.rowKey];
       } else if (desc.kind === 'cell') {
         textarea.value = desc.t === 'm' ? E.DEFAULT_MAH_FORMULA : '0';
       } else {
@@ -3512,11 +3679,12 @@
       + '<button type="button" class="es-icon-btn es-icon-danger" data-es-help-close><span class="material-symbols-outlined">close</span></button></div>'
       + '<div class="es-help-body">'
       + '<h5>一、单元格地址（A1）</h5>'
-      + '<p>A 列为场景名（文本标签，不参与公式）；第 1 行表头，场景行从第 2 行开始'
-      + (model ? '（本表共 ' + n + ' 个场景行，Total 在第 ' + E.totalRowNumber(model) + ' 行，可使用时长在第 ' + E.douRowNumber(model) + ' 行）' : '') + '；'
-      + 'B=电流（可自由编辑且支持 B2 等裸地址引用）；每个对比列占连续三列「时长 / 耗电 / 备注」，'
-      + 'B 列为场景电流（地址 B2、B3…，可在本模型内自由改写为数字 / 文字 / 公式，留空回退场景共享电流）；第 1 个对比列为 C（时长）/ D（耗电）/ E（备注），第 2 个为 F / G / H，依次类推；备注列同样可被 A1 引用（文本参与数值运算时记 #VALUE!）。鼠标悬停单元格可见地址。'
-      + '表中「平均电流」为自动展示行，不占用公式地址；Typ / Min 两个可使用时长同处 DOU 行，分别按时长 / 耗电列地址引用。</p>'
+      + '<p>A 列为场景 / 自由行标题（数据区按文本处理）；第 1 行表头，场景行从第 2 行开始'
+      + (model ? '（本表共 ' + n + ' 个数据行，Total 在第 ' + E.totalRowNumber(model) + ' 行，平均电流在第 ' + E.avgRowNumber(model)
+        + ' 行，Typ 在第 ' + E.douRowNumber(model) + ' 行，Min 在第 ' + E.douMinRowNumber(model) + ' 行）' : '') + '；'
+      + 'B=电流（数据区与四个汇总行均可自由编辑，支持 B2 等裸地址引用）；每个对比列占连续三列「时长 / 耗电 / 备注」，'
+      + '数据区 B 列留空时回退场景共享电流；第 1 个对比列为 C（时长）/ D（耗电）/ E（备注），第 2 个为 F / G / H，依次类推；备注列同样可被 A1 引用（文本参与数值运算时记 #VALUE!）。鼠标悬停单元格可见地址。'
+      + '汇总区 A/B/C/D/E… 都是连续物理格：SUM 时长落在 C/F/I…，SUM 耗电、平均电流、Typ/Min 结果落在 D/G/J…；平均电流留空时界面显示自动值，公式引用该地址也取同一个自动值。</p>'
       + '<h5>二、电池参数（随电池卡片实时联动，不硬编码容量）</h5>'
       + '<p><b>Typ</b> 电池容量 Typ；<b>Min</b> 电池容量 Min；<b>比例</b> 可放电容量比例(0.2C)（空值按 1）；<b>门限</b> 低电量门限（空值按 0）；'
       + '<b>可用容量</b> = Typ × 比例（即云表 239 的来源）；<b>折减容量</b> = Typ × 比例 × (1 − 门限)；<b>关机电压 / Wh / 电压</b>。</p>'
