@@ -1291,3 +1291,39 @@ body.es-col-resizing * { user-select: none !important; }
   .es-name-edit-input,
   .es-current-edit-input { padding: .24rem .12rem; }
 }
+
+/* ===== v52 全开放网格：B 电流 / 备注引用 / 自由行插入 ===== */
+.es-excel-grid .es-current-cell { min-width: 92px; }
+.es-excel-grid td.es-current-cell:hover { background-color: #eef4ff; }
+.es-excel-grid .es-current-cell.es-avg-auto .es-cell-text { color: #94a3b8; }
+.es-excel-grid .es-note-cell input { font-weight: 600; }
+.es-excel-grid .es-note-cell input.is-error {
+  box-shadow: inset 0 0 0 1px #ef4444;
+  background: #fef2f2;
+}
+.es-row-insert-btn {
+  display: none;
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  font-size: .72rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: .05rem .1rem;
+  border-radius: 3px;
+  font-weight: 800;
+}
+.es-row-insert-btn .material-symbols-outlined {
+  font-size: .82rem;
+  line-height: 1;
+}
+.es-excel-grid tr:hover .es-row-insert-btn { display: inline-block; }
+.es-row-insert-btn:hover { background: #dbeafe; }
+.es-excel-grid .is-editing .es-row-insert-btn,
+.es-excel-grid .is-editing .es-row-del-btn { display: none; }
+
+@media (max-width: 640px) {
+  .es-excel-grid .es-current-cell { min-width: 72px; }
+  .es-row-insert-btn,
+  .es-row-del-btn { padding: .03rem .08rem; }
+}
