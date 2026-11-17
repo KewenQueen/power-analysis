@@ -1214,3 +1214,80 @@ body.es-col-resizing * { user-select: none !important; }
   .es-excel-grid .es-note-input { padding: .24rem .3rem; }
   .es-rowh-label { display: none; }
 }
+
+/* ===== v51 自由编辑：点格就地编辑（数字 / 文本 / 公式） ===== */
+/* 可编辑数据格：hover 给出 Excel 式选中提示 */
+.es-excel-grid .es-editable-cell {
+  cursor: cell;
+  transition: background-color .12s ease, box-shadow .12s ease;
+}
+.es-excel-grid td.es-editable-cell:hover,
+.es-excel-grid th.es-editable-cell:hover {
+  background-color: #eef4ff;
+  box-shadow: inset 0 0 0 1px #c7d2fe;
+}
+/* 列名 / 场景名可编辑 hover */
+.es-excel-grid .es-colname-edit,
+.es-excel-grid .es-sc-name.es-editable-cell { cursor: pointer; }
+.es-excel-grid .es-colname-edit:hover { color: #1a73e8; }
+.es-excel-grid th.es-editable-cell:hover .es-sc-name { color: #1a73e8; }
+
+/* 行内编辑容器：去掉内边距让输入框撑满，Excel 选中蓝框 */
+.es-excel-grid .is-editing {
+  padding: 0 !important;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #1a73e8;
+}
+.es-inline-edit-input,
+.es-cell-edit-input,
+.es-name-edit-input,
+.es-current-edit-input,
+.es-colname-edit-input {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  border: 0;
+  outline: none;
+  border-radius: 0;
+  background: #fff;
+  color: #1e293b;
+  font: inherit;
+  font-weight: 700;
+  text-align: center;
+  padding: .3rem .25rem;
+}
+.es-name-edit-input { text-align: left; }
+.es-colname-edit-input { font-size: .68rem; padding: .22rem .2rem; }
+.es-excel-grid .is-editing.is-error {
+  box-shadow: inset 0 0 0 2px #ef4444;
+  background: #fef2f2;
+}
+.es-excel-grid .is-editing.is-error input { background: #fef2f2; }
+
+/* 行号内删除按钮：默认隐藏，悬停该行时出现 */
+.es-excel-grid .es-excel-rownum { position: relative; }
+.es-row-del-btn {
+  display: none;
+  border: 0;
+  background: transparent;
+  color: #ef4444;
+  font-size: .72rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: .05rem .12rem;
+  border-radius: 3px;
+  font-weight: 800;
+}
+.es-excel-grid tr:hover .es-row-del-btn { display: inline-block; }
+.es-row-del-btn:hover { background: #fee2e2; }
+.es-rownum-num { font-weight: 800; }
+
+/* 自动平均电流（未自定义）用淡灰与自定义值区分 */
+.es-formula-cell .es-avg-auto-text { color: #94a3b8; font-weight: 700; }
+
+@media (max-width: 640px) {
+  .es-inline-edit-input,
+  .es-cell-edit-input,
+  .es-name-edit-input,
+  .es-current-edit-input { padding: .24rem .12rem; }
+}

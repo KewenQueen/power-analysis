@@ -1,16 +1,16 @@
 // 全部使用相对路径：本地根部署与 GitHub Pages 子路径（/power-analysis/）都能正确缓存
-const CACHE_VERSION = 'power-analysis-pwa-v50';
+const CACHE_VERSION = 'power-analysis-pwa-v51';
 const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
-  './style.css?v=20261117u',
-  './endurance.css?v=20261117u',
+  './style.css?v=20261117v',
+  './endurance.css?v=20261117v',
   './config.js?v=2026100124',
   './supabase-auth.js?v=2026100124',
-  './app.js?v=20261117u',
-  './formula.js?v=20261117u',
-  './endurance.js?v=20261117u',
+  './app.js?v=20261117v',
+  './formula.js?v=20261117v',
+  './endurance.js?v=20261117v',
   './template.xlsx',
   './icon-192.svg',
   './icon-512.svg'
