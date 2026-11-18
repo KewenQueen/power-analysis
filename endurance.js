@@ -2763,6 +2763,17 @@
     return '<span class="es-cell-value">' + fmt(r.value, 2) + '</span>';
   }
 
+  // 汇总区备注格：与数据行备注完全同一种形态（文本框 + 「备注/说明」占位），只接受纯文本、不提供 fx / 不解析公式
+  function footerNoteCell(model, col, t) {
+    const colIndex = model.columns.findIndex((c) => c.id === col.id);
+    const rowKey = t === 'noteTotal' ? 'total' : (t === 'noteAvg' ? 'avg' : (t === 'noteTyp' ? 'douTyp' : 'douMin'));
+    const addr = E.noteLetterFor(colIndex) + E.footerRowNumber(model, rowKey);
+    const v = (model.foot[col.id] && model.foot[col.id][t]) || '';
+    return '<td class="es-note-cell"><input type="text" class="es-note-input" data-es-foot-note="'
+      + escapeHtml(col.id) + '" data-es-foot-note-field="' + escapeHtml(t) + '" value="' + escapeHtml(v)
+      + '" placeholder="备注/说明" autocomplete="off" title="地址 ' + escapeHtml(addr) + '：纯文本备注（不解析公式）" /></td>';
+  }
+
   // 汇总/数据通用格：默认一个物理列一个格；只有平均电流 / Typ / Min 结果格用 colspan=2 合并「时长+耗电」两列
   function formulaCellHtml(ev, model, desc, digits, colspan) {
     const addr = E.addressOf(model, desc);
@@ -2940,18 +2951,18 @@
       + footerLabel('total') + footerCurrent('total')
       + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'td' }, 2)
         + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'tm' }, 2)
-        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'noteTotal' }, 2)).join('') + '</tr>';
+        + footerNoteCell(model, col, 'noteTotal')).join('') + '</tr>';
 
     const avgRow = '<tr class="es-stat-row es-stat-auto"><th class="es-excel-rownum">' + E.avgRowNumber(model) + '</th>'
       + footerLabel('avg') + footerCurrent('avg')
       + model.columns.map((col) => avgCellHtml(ev, model, col)
-        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'noteAvg' }, 2)).join('') + '</tr>';
+        + footerNoteCell(model, col, 'noteAvg')).join('') + '</tr>';
 
     const douRow = (rowKey, valueType, noteType) => '<tr class="es-stat-row"><th class="es-excel-rownum">'
       + E.footerRowNumber(model, rowKey) + '</th>'
       + footerLabel(rowKey) + footerCurrent(rowKey)
       + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: valueType }, 2, 2)
-        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: noteType }, 2)).join('') + '</tr>';
+        + footerNoteCell(model, col, noteType)).join('') + '</tr>';
 
     const totals = totalRowHtml + avgRow
       + douRow('douTyp', 'douTyp', 'noteTyp')
@@ -3153,6 +3164,21 @@
 
     // 列宽拖拽 / 双击恢复默认
     bindGridColumnResize();
+
+    // 汇总区备注格：纯文本，实时写回 foot 并保存（不解析公式、不整卡重绘以保留焦点）
+    root.querySelectorAll('[data-es-foot-note]').forEach((input) => {
+      input.addEventListener('input', () => {
+        const model = activeModel(project);
+        if (!model) return;
+        const colId = input.dataset.esFootNote;
+        const field = input.dataset.esFootNoteField;
+        if (!model.foot[colId]) model.foot[colId] = E.defaultFoot('normal');
+        model.foot[colId][field] = input.value;
+        E.store.save();
+        updateModelCells(project, model);
+        quietRefreshCompare();
+      });
+    });
 
     // 备注/说明列：实时写回模型行并保存、不整卡重绘（保留输入焦点）；v52 起内容也可被其它单元格按 A1 地址引用。
     // 备注为场景行级、与具体模型无关，同一行在各模型模块内的备注框共享同一份 row.note，
@@ -3709,7 +3735,7 @@
         + ' 行，Typ 在第 ' + E.douRowNumber(model) + ' 行，Min 在第 ' + E.douMinRowNumber(model) + ' 行）' : '') + '；'
       + 'B=电流（数据区与四个汇总行均可自由编辑，支持 B2 等裸地址引用）；每个对比列占连续三列「时长 / 耗电 / 备注」，'
       + '数据区 B 列留空时回退场景共享电流；第 1 个对比列为 C（时长）/ D（耗电）/ E（备注），第 2 个为 F / G / H，依次类推；备注列同样可被 A1 引用（文本参与数值运算时记 #VALUE!）。鼠标悬停单元格可见地址。'
-      + '汇总区 A/B 为标签与电流；Total 行 C/F/I… 放本列时长 SUM、D/G/J… 放本列耗电 SUM、E/H/K… 放备注（备注列为「备注/说明」）；'
+      + '汇总区 A/B 为标签与电流；Total 行 C/F/I… 放本列时长 SUM、D/G/J… 放本列耗电 SUM、E/H/K… 放备注（备注列为「备注/说明」，与数据行同一种纯文本输入框，不解析公式）；'
       + '平均电流与 Typ/Min 三行按模块把「时长 + 耗电」两列合并（C:D / F:G / I:J），A1 地址取合并区左上角（如 C15、C16、C17），右侧 D 地址兼容指向同一结果；平均电流留空时界面显示自动值，公式引用该地址也取同一个自动值。</p>'
       + '<h5>二、电池参数（随电池卡片实时联动，不硬编码容量）</h5>'
       + '<p><b>Typ</b> 电池容量 Typ；<b>Min</b> 电池容量 Min；<b>比例</b> 可放电容量比例(0.2C)（空值按 1）；<b>门限</b> 低电量门限（空值按 0）；'
