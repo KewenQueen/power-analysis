@@ -1074,22 +1074,23 @@ body.es-col-resizing * { user-select: none !important; }
   text-overflow: ellipsis;
 }
 /* 让单元格内容可收缩，列宽严格跟随 colgroup 设定（默认 / 拖拽宽度不被内容反向撑宽） */
+/* 关键：td 必须保持 table-cell 布局。给 td 设 display:flex 会让它生成匿名单元格，
+   破坏列对齐（汇总行错位、行号与数值不在同一行），这里用 inline 内容实现居中。 */
 .es-excel-grid input { min-width: 0; max-width: 100%; }
 .es-excel-grid .es-formula-cell {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: .15rem;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 .es-excel-grid .es-cell-text {
-  flex: 1 1 auto;
+  display: inline-block;
+  vertical-align: middle;
   min-width: 0;
-  max-width: 100%;
+  max-width: calc(100% - 1.15rem);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.es-excel-grid .es-fx-btn { flex: 0 0 auto; margin-left: 0; }
+.es-excel-grid .es-fx-btn { display: inline-flex; vertical-align: middle; margin-left: .1rem; }
 
 /* 行悬停：Excel 式浅蓝 */
 .es-excel-grid tbody tr:hover td,
