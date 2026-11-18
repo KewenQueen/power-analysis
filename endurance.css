@@ -436,7 +436,6 @@
   background: #fef2f2;
   box-shadow: 0 0 0 3px rgba(239, 68, 68, .12);
 }
-.es-dt-ratio { text-align: center; color: #4338ca; font-weight: 800; font-size: .72rem; }
 .es-discharge-sync {
   display: flex;
   align-items: flex-start;
@@ -452,6 +451,66 @@
 }
 .es-discharge-sync b { color: #4338ca; font-weight: 800; }
 .es-discharge-sync .material-symbols-outlined { font-size: .95rem; color: #818cf8; flex: none; margin-top: .05rem; }
+
+/* ---------- v60：温度 × 放电倍率 容量矩阵 ---------- */
+.es-matrix-table { min-width: 720px; }
+.es-matrix-table th {
+  font-size: .66rem;
+  color: #475569;
+  background: #f8faff;
+  border-bottom: 1px solid #e5eaf5;
+}
+.es-dm-vhead { text-align: center; }
+.es-dm-vwrap { display: inline-flex; align-items: center; gap: .1rem; }
+.es-dm-vinput {
+  width: 46px;
+  border: 1px solid #dbe3ef;
+  border-radius: .4rem;
+  padding: .18rem .25rem;
+  font-size: .68rem;
+  font-weight: 800;
+  text-align: center;
+  color: #1e293b;
+  background: #fff;
+  outline: none;
+}
+.es-dm-vinput:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129, 140, 248, .14); }
+.es-dm-vinput.is-invalid { border-color: #ef4444; background: #fef2f2; }
+.es-dm-vdel { transform: scale(.8); opacity: .5; }
+.es-dm-vdel:hover { opacity: 1; }
+.es-dm-cell { padding: .25rem .3rem; }
+.es-dm-cell .es-dt-input { width: 72px; }
+.es-dm-pct {
+  display: block;
+  margin-top: .12rem;
+  text-align: center;
+  font-size: .6rem;
+  font-weight: 800;
+  color: #6366f1;
+}
+
+/* ---------- v60：项目配置（关机电压 / 低电量门限） ---------- */
+.es-project-config {
+  margin-top: .75rem;
+  padding: .75rem .8rem .7rem;
+  border: 1px solid #e5eaf5;
+  border-radius: .8rem;
+  background: #fbfcff;
+}
+.es-project-config .es-submodule-head small { color: #94a3b8; font-size: .62rem; font-weight: 600; }
+.es-config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .6rem;
+  margin-top: .55rem;
+}
+.es-config-hint {
+  margin: .55rem 0 0;
+  color: #94a3b8;
+  font-size: .64rem;
+  font-weight: 500;
+  line-height: 1.6;
+}
 
 /* ================================================================
  * v2 公式网格 / 场景电流新列 / 公式编辑器（2026-11 追加）

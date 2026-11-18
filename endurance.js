@@ -59,13 +59,98 @@
   }
 
   // ---------- 存储层 ----------
+  // 电池可放电容量查询表（v60 起按电池规格书格式）：温度分组 × 放电倍率 × 各截止电压的累计可放电容量
+  // { voltages: [3,3.1,3.2,3.3,3.4], rows: [{ id, temp:'25度', cRate:'0.2C', mah: { '3': 246, ... } }] }
+  const DEFAULT_CUTOFF_VOLTAGES = [3, 3.1, 3.2, 3.3, 3.4];
+  // 电压列：数值升序 + 去重，作为矩阵的统一列定义
+  function matrixVoltages(matrix) {
+    const list = ((matrix && matrix.voltages) || []).map((v) => num(v)).filter((v) => v !== null);
+    const unique = [];
+    list.forEach((v) => { if (unique.indexOf(v) === -1) unique.push(v); });
+    return unique.sort((a, b) => a - b);
+  }
+  // 最低截止电压列（同一行里累计可放电最多的一格），用于规格书口径参考
+  function matrixBaseVoltage(matrix) {
+    const vs = matrixVoltages(matrix);
+    return vs.length ? vs[0] : null;
+  }
+  function matrixCells(row) {
+    return (row && row.mah && typeof row.mah === 'object') ? row.mah : {};
+  }
+  // 单元格取值：优先按数值 key，兼容导入时保留的字符串 key
+  function matrixCellValue(row, voltage) {
+    const cells = matrixCells(row);
+    const v = num(voltage);
+    if (v === null) return null;
+    if (Object.prototype.hasOwnProperty.call(cells, String(v))) return num(cells[String(v)]);
+    const key = Object.keys(cells).find((k) => num(k) === v);
+    return key === undefined ? null : num(cells[key]);
+  }
+  function matrixSetCell(row, voltage, value) {
+    if (!row.mah || typeof row.mah !== 'object') row.mah = {};
+    row.mah[String(voltage)] = value;
+  }
+  function sampleDischargeMatrix() {
+    // 示例数据 = 246mAh 电池（与 3.4V/0.95 比例的示例口径一致），按倍率递增逐格衰减
+    const base = { 3: 246, 3.1: 243.5, 3.2: 240.5, 3.3: 238, 3.4: 233.7 };
+    const rates = [
+      ['0.2C', 1], ['0.5C', 0.965], ['1.0C', 0.93], ['1.5C', 0.9], ['2C', 0.875], ['4C', 0.82],
+    ];
+    return {
+      voltages: DEFAULT_CUTOFF_VOLTAGES.slice(),
+      rows: rates.map(([rate, k]) => {
+        const mah = {};
+        DEFAULT_CUTOFF_VOLTAGES.forEach((v) => { mah[String(v)] = Math.round(base[v] * k * 10) / 10; });
+        return { id: uid('dt'), temp: '25度', cRate: rate, mah: mah };
+      }),
+    };
+  }
+  // 旧「电压 - 容量点」表 → 新的单行（25度 / 0.2C）矩阵，保证老数据不丢
+  function matrixFromLegacyTable(rows) {
+    const pts = sortDischargeTable(rows);
+    if (!pts.length) return null;
+    const voltages = pts.map((p) => p.voltage).sort((a, b) => a - b);
+    const mah = {};
+    pts.forEach((p) => { mah[String(p.voltage)] = p.capacityMah; });
+    return { voltages: voltages, rows: [{ id: uid('dt'), temp: '25度', cRate: '0.2C', mah: mah }] };
+  }
+  // 取用于插值的曲线：优先 0.2C 行（比例口径就是 0.2C），其次第一行
+  // 温度维度只做展示分组：同一张表内若存在多个温度，按 0.2C 行取第一条（默认 25 度），不自动跨温度换算
+  function matrixCurve(matrix) {
+    if (!matrix || !Array.isArray(matrix.rows) || !matrix.rows.length) return [];
+    const row = matrix.rows.find((r) => String(r.cRate || '').toLowerCase().indexOf('0.2') === 0) || matrix.rows[0];
+    return matrixVoltages(matrix).map((v) => ({ voltage: v, capacityMah: matrixCellValue(row, v) }))
+      .filter((p) => p.capacityMah !== null);
+  }
+
+  // 查询表有效曲线：只要项目已经有矩阵，矩阵就是唯一口径（清空即无数据，不再回退旧表）；
+  // 仅当对象里完全没有矩阵（异常残缺数据）时才读旧「电压-容量点」表
+  function dischargeCurve(battery) {
+    const b = battery || {};
+    if (b.dischargeMatrix && typeof b.dischargeMatrix === 'object') return matrixCurve(b.dischargeMatrix);
+    return sortDischargeTable(b.dischargeTable);
+  }
+
+  // 项目配置：关机电压、低电量门限属于整机口径，从电池参数里独立出来（v60）
+  function defaultProjectConfig() {
+    return { shutdownVoltage: '', lowThreshold: '' };
+  }
+  function projectConfig(project) {
+    if (!project) return defaultProjectConfig();
+    if (!project.config || typeof project.config !== 'object') project.config = defaultProjectConfig();
+    const c = project.config;
+    if (c.shutdownVoltage === undefined || c.shutdownVoltage === null) c.shutdownVoltage = '';
+    if (c.lowThreshold === undefined || c.lowThreshold === null) c.lowThreshold = '';
+    return c;
+  }
+
   function defaultBattery() {
     return {
       capTyp: '', capMin: '', wh: '', voltage: '',
-      shutdownVoltage: '',
-      dischargeRatio: '', lowThreshold: '',
-      // 电池可放电容量查询表：[{ id, voltage, capacityMah }]，按电压降序；
-      // capacityMah = 电池从满电放电至该电压时累计可放出的容量（mAh）
+      dischargeRatio: '',
+      // 电池可放电容量查询表：温度 × 放电倍率 × 截止电压矩阵（新项目为空表，示例项目由 seed 填充）
+      dischargeMatrix: { voltages: DEFAULT_CUTOFF_VOLTAGES.slice(), rows: [] },
+      // 兼容旧版本：单条「电压 - 容量点」曲线，仅作迁移来源
       dischargeTable: [],
     };
   }
@@ -331,20 +416,12 @@
       name: '示例项目（可删除）',
       createdAt: Date.now(),
       scenarioFields: [],
+      // 项目配置：关机电压 / 低电量门限（与电池参数解耦）
+      config: { shutdownVoltage: '3.4', lowThreshold: '0.02' },
       battery: Object.assign(defaultBattery(), {
         capTyp: 246, capMin: 240, wh: 0.95, voltage: 3.87,
-        shutdownVoltage: 3.4,
-        dischargeRatio: 0.95, lowThreshold: 0.02,
-        // 示例查询表：关机电压 3.4V 对应可放电 233.7mAh ≈ 246 × 0.95
-        dischargeTable: [
-          { id: uid('dt'), voltage: 4.2, capacityMah: 0 },
-          { id: uid('dt'), voltage: 4.0, capacityMah: 30 },
-          { id: uid('dt'), voltage: 3.8, capacityMah: 90 },
-          { id: uid('dt'), voltage: 3.6, capacityMah: 170 },
-          { id: uid('dt'), voltage: 3.4, capacityMah: 233.7 },
-          { id: uid('dt'), voltage: 3.2, capacityMah: 243 },
-          { id: uid('dt'), voltage: 3.0, capacityMah: 246 },
-        ],
+        dischargeRatio: 0.95,
+        dischargeMatrix: sampleDischargeMatrix(),
       }),
       scenarios: scenarios,
       models: [],
@@ -375,8 +452,34 @@
       const b = project.battery || (project.battery = defaultBattery());
       if ('envStandbyCurrent' in b) { delete b.envStandbyCurrent; changed = true; }
       if ('wakeCurrent' in b) { delete b.wakeCurrent; changed = true; }
-      if (!('shutdownVoltage' in b)) { b.shutdownVoltage = ''; changed = true; }
+      // 关机电压 / 低电量门限 → 项目配置（v60 迁移，值不丢）
+      let freshConfig = false;
+      if (!project.config || typeof project.config !== 'object') {
+        project.config = defaultProjectConfig();
+        freshConfig = true;
+        changed = true;
+      }
+      if (freshConfig) {
+        project.config.shutdownVoltage = (b.shutdownVoltage === undefined || b.shutdownVoltage === null) ? '' : b.shutdownVoltage;
+        project.config.lowThreshold = (b.lowThreshold === undefined || b.lowThreshold === null) ? '' : b.lowThreshold;
+      }
+      if ('shutdownVoltage' in b) { delete b.shutdownVoltage; changed = true; }
+      if ('lowThreshold' in b) { delete b.lowThreshold; changed = true; }
       if (!Array.isArray(b.dischargeTable)) { b.dischargeTable = []; changed = true; }
+      if (!b.dischargeMatrix || typeof b.dischargeMatrix !== 'object' || !Array.isArray(b.dischargeMatrix.rows)) {
+        // 老项目：旧点表迁成单行（25度 / 0.2C）；迁移完成后删除旧表，避免清空矩阵后旧数据又冒出来
+        b.dischargeMatrix = matrixFromLegacyTable(b.dischargeTable)
+          || { voltages: DEFAULT_CUTOFF_VOLTAGES.slice(), rows: [] };
+        b.dischargeTable = [];
+        changed = true;
+      } else if (!Array.isArray(b.dischargeMatrix.voltages) || !b.dischargeMatrix.voltages.length) {
+        b.dischargeMatrix.voltages = DEFAULT_CUTOFF_VOLTAGES.slice();
+        changed = true;
+      }
+      (b.dischargeMatrix.rows || []).forEach((row) => {
+        if (!row.id) { row.id = uid('dt'); changed = true; }
+        if (!row.mah || typeof row.mah !== 'object') { row.mah = {}; changed = true; }
+      });
       if (!Array.isArray(project.scenarioFields)) { project.scenarioFields = []; changed = true; }
       (project.scenarios || []).forEach((scenario) => {
         if (!('standard' in scenario)) { scenario.standard = ''; changed = true; }
@@ -494,9 +597,10 @@
   // 依据关机电压 + 查询表 + Typ 容量推导可放电容量比例；信息不足时返回 null 并带原因
   function deriveDischargeRatio(project) {
     const b = (project && project.battery) || {};
-    const table = sortDischargeTable(b.dischargeTable);
+    const cfg = projectConfig(project);
+    const table = dischargeCurve(b);
     if (!table.length) return { ok: false, reason: 'empty-table' };
-    const shutdown = num(b.shutdownVoltage);
+    const shutdown = num(cfg.shutdownVoltage);
     if (shutdown === null) return { ok: false, reason: 'no-shutdown-voltage' };
     const capacityMah = lookupDischargeCapacity(table, shutdown);
     if (capacityMah === null) return { ok: false, reason: 'lookup-failed' };
@@ -549,6 +653,7 @@
         name: name,
         createdAt: Date.now(),
         scenarioFields: [],
+        config: defaultProjectConfig(),
         battery: defaultBattery(),
         // 新项目默认载入云表 12 个标准场景及对应场景电流，开箱即可计算
         scenarios: buildDefaultScenarios(),
@@ -673,9 +778,14 @@
       return next;
     });
 
-    // 2) 电池可放电容量查询表点 id（无外部引用，重生成保持 id 体系统一）
+    // 2) 电池可放电容量查询表点 / 矩阵行 id（无外部引用，重生成保持 id 体系统一）
     if (p.battery && Array.isArray(p.battery.dischargeTable)) {
       p.battery.dischargeTable = p.battery.dischargeTable.map((d) => Object.assign({}, d, { id: uid('dt') }));
+    }
+    if (p.battery && p.battery.dischargeMatrix && Array.isArray(p.battery.dischargeMatrix.rows)) {
+      p.battery.dischargeMatrix = Object.assign({}, p.battery.dischargeMatrix, {
+        rows: p.battery.dischargeMatrix.rows.map((r) => Object.assign({}, r, { id: uid('dt'), mah: Object.assign({}, r.mah) })),
+      });
     }
 
     // 3) 场景 id + 测试记录 id + 场景内自定义字段 key 重映射
@@ -991,8 +1101,9 @@
     const b = (project && project.battery) || {};
     const capTyp = num(b.capTyp);
     const capMin = num(b.capMin);
+    const cfg = projectConfig(project);
     const ratioRaw = num(b.dischargeRatio);
-    const thresholdRaw = num(b.lowThreshold);
+    const thresholdRaw = num(cfg.lowThreshold);
     const ratio = ratioRaw === null ? 1 : ratioRaw;
     const threshold = thresholdRaw === null ? 0 : thresholdRaw;
     const need = (v) => (v === null ? { type: ET.VALUE } : v);
@@ -1005,7 +1116,7 @@
       '门限': threshold, '低电量门限': threshold,
       '可用容量': available, '可用电量': available,
       '折减容量': derated,
-      '关机电压': need(num(b.shutdownVoltage)),
+      '关机电压': need(num(cfg.shutdownVoltage)),
       'Wh': need(num(b.wh)), '电压': need(num(b.voltage)),
     };
   }
@@ -1276,8 +1387,9 @@
     const ev = evaluateModel(project, model);
     const s = ev.stats[column.id] || {};
     const b = project.battery || {};
+    const cfg = projectConfig(project);
     const ratio = num(b.dischargeRatio);
-    const threshold = num(b.lowThreshold);
+    const threshold = num(cfg.lowThreshold);
     const derate = (ratio === null ? 1 : ratio) * (1 - (threshold === null ? 0 : threshold));
     const isFull = column.kind === 'full';
     return {
@@ -1302,6 +1414,9 @@
     store, defaultBattery, latestRecord, scenarioCurrent,
     computeModeStats, computeModelStats, evaluateModel, evaluateSingleLife,
     sortDischargeTable, lookupDischargeCapacity, deriveDischargeRatio,
+    DEFAULT_CUTOFF_VOLTAGES, matrixVoltages, matrixBaseVoltage, matrixCells, matrixCellValue,
+    matrixCurve, matrixFromLegacyTable, matrixSetCell, dischargeCurve, sampleDischargeMatrix,
+    defaultProjectConfig, projectConfig,
     DEFAULT_MAH_FORMULA, defaultFoot, defaultModelFooter, createColumn, createModelV2, migrateModelV1,
     defaultScenarioDefs, buildDefaultScenarios, mergeDefaultScenarios, currentCompare,
     sanitizeFileName, fileTimestamp, buildProjectExport, parseProjectImport,
@@ -1544,7 +1659,11 @@
 (function () {
   'use strict';
   const E = window.ES_ENDURANCE;
-  const { escapeHtml, uid, num, fmt, debounce } = E;
+  const {
+    escapeHtml, uid, num, fmt, debounce,
+    projectConfig, defaultProjectConfig, matrixVoltages, matrixCells, matrixCellValue, matrixSetCell,
+    dischargeCurve, DEFAULT_CUTOFF_VOLTAGES,
+  } = E;
 
   const root = document.getElementById('enduranceStatusRoot');
 
@@ -1561,6 +1680,7 @@
     if (project) {
       bindBattery(project);
       bindDischargeCard(project);
+      bindProjectConfig(project);
       window.ES_ENDURANCE_SCENARIO.bindScenarios(project);
       window.ES_ENDURANCE_MODEL.bindModels(project);
       window.ES_ENDURANCE_UI.bindCompare(project);
@@ -1719,10 +1839,20 @@
     { key: 'capMin', label: '电池容量 Min（mAh）', placeholder: '示例：240' },
     { key: 'wh', label: '额定容量 Wh', placeholder: '示例：0.95' },
     { key: 'voltage', label: '额定电压 V', placeholder: '示例：3.87' },
-    { key: 'shutdownVoltage', label: '关机电压 V', placeholder: '示例：3.4' },
     { key: 'dischargeRatio', label: '可放电容量比例(0.2C)', placeholder: '0~1，示例：0.95（可由查询表自动回填）' },
-    { key: 'lowThreshold', label: '低电量门限', placeholder: '0~1，示例：0.02' },
   ];
+
+  function batteryDerateLine(project) {
+    const b = project.battery || {};
+    const cfg = projectConfig(project);
+    const ratio = num(b.dischargeRatio);
+    const threshold = num(cfg.lowThreshold);
+    const capTyp = num(b.capTyp);
+    const derate = (ratio === null ? 1 : ratio) * (1 - (threshold === null ? 0 : threshold));
+    const available = capTyp === null ? null : capTyp * (ratio === null ? 1 : ratio);
+    return '可用容量（公式名「可用容量」= Typ × 可放电比例）= <b>' + fmt(available, 2)
+      + ' mAh</b>；综合可用电量系数 = 可放电比例 × (1 − 低电量门限) = <b>' + fmt(derate, 4) + '</b>';
+  }
 
   function renderBatteryCard(project) {
     const b = project.battery || {};
@@ -1734,18 +1864,13 @@
         + ' value="' + escapeHtml(val) + '" placeholder="' + escapeHtml(f.placeholder) + '" autocomplete="off" />'
         + '</label>';
     }).join('');
-    const ratio = num(b.dischargeRatio);
-    const threshold = num(b.lowThreshold);
-    const derate = (ratio === null ? 1 : ratio) * (1 - (threshold === null ? 0 : threshold));
-    const capTyp = num(b.capTyp);
-    const available = capTyp === null ? null : capTyp * (ratio === null ? 1 : ratio);
     return '<section class="panel rounded-3xl es-card">'
       + '<header class="es-card-head"><h3><span class="material-symbols-outlined">battery_full</span>电池参数</h3>'
       + '<small>续航公式基于这些参数自动计算，修改后实时保存</small></header>'
       + '<div class="es-battery-grid">' + fields + '</div>'
-      + '<p class="es-battery-derate">可用容量（公式名「可用容量」= Typ × 可放电比例）= <b>' + fmt(available, 2)
-      + ' mAh</b>；综合可用电量系数 = 可放电比例 × (1 − 低电量门限) = <b>' + fmt(derate, 4) + '</b></p>'
+      + '<p class="es-battery-derate">' + batteryDerateLine(project) + '</p>'
       + renderDischargeCard(project)
+      + renderProjectConfigCard(project)
       + '</section>';
   }
 
@@ -1757,9 +1882,9 @@
         const key = input.dataset.esBattery;
         const raw = input.value.trim();
         const parsed = raw === '' ? '' : num(raw);
-        // 非数字、负数不允许写入；比例 / 门限还必须落在 0~1
+        // 非数字、负数不允许写入；比例还必须落在 0~1
         let invalid = raw !== '' && (parsed === null || parsed < 0);
-        if (!invalid && (key === 'dischargeRatio' || key === 'lowThreshold') && raw !== '' && parsed > 1) {
+        if (!invalid && key === 'dischargeRatio' && raw !== '' && parsed > 1) {
           invalid = true;
         }
         if (invalid) {
@@ -1770,17 +1895,9 @@
         project.battery[key] = raw;
         saveBattery();
         const derateEl = root.querySelector('.es-battery-derate');
-        if (derateEl) {
-          const ratio = num(project.battery.dischargeRatio);
-          const threshold = num(project.battery.lowThreshold);
-          const typNow = num(project.battery.capTyp);
-          const derate = (ratio === null ? 1 : ratio) * (1 - (threshold === null ? 0 : threshold));
-          const avail = typNow === null ? null : typNow * (ratio === null ? 1 : ratio);
-          derateEl.innerHTML = '可用容量（公式名「可用容量」= Typ × 可放电比例）= <b>' + fmt(avail, 2)
-            + ' mAh</b>；综合可用电量系数 = 可放电比例 × (1 − 低电量门限) = <b>' + fmt(derate, 4) + '</b>';
-        }
-        // 关机电压 / Typ 容量变化时，查询表联动重算可放电容量比例
-        if (key === 'shutdownVoltage' || key === 'capTyp') {
+        if (derateEl) derateEl.innerHTML = batteryDerateLine(project);
+        // Typ 容量变化时，查询表占 Typ 比例与可放电比例联动重算
+        if (key === 'capTyp') {
           syncRatioFromTable();
         }
         // 电池参数变化会影响 DOU，局部刷新模型与对比区
@@ -1806,6 +1923,48 @@
     }
   }, 220);
 
+  // ---------- 项目配置（关机电压 / 低电量门限） ----------
+  function renderProjectConfigCard(project) {
+    const cfg = projectConfig(project);
+    return '<div class="es-submodule es-project-config">'
+      + '<div class="es-submodule-head"><h4><span class="material-symbols-outlined">tune</span>项目配置</h4>'
+      + '<small>整机口径，不随电池规格书变化</small></div>'
+      + '<div class="es-config-grid">'
+      + '<label class="es-battery-field"><span>关机电压 V</span>'
+      + '<input type="text" inputmode="decimal" data-es-config="shutdownVoltage" value="' + escapeHtml(cfg.shutdownVoltage)
+      + '" placeholder="示例：3.4" autocomplete="off" /></label>'
+      + '<label class="es-battery-field"><span>低电量门限</span>'
+      + '<input type="text" inputmode="decimal" data-es-config="lowThreshold" value="' + escapeHtml(cfg.lowThreshold)
+      + '" placeholder="0~1，示例：0.02" autocomplete="off" /></label>'
+      + '</div>'
+      + '<p class="es-config-hint">关机电压用于在查询表中插值出可放电容量并回填「可放电容量比例」；低电量门限只参与综合可用电量系数，不改写电池容量。</p>'
+      + '</div>';
+  }
+
+  function bindProjectConfig(project) {
+    const cfg = projectConfig(project);
+    root.querySelectorAll('[data-es-config]').forEach((input) => {
+      input.addEventListener('input', () => {
+        const key = input.dataset.esConfig;
+        const raw = input.value.trim();
+        const parsed = raw === '' ? '' : num(raw);
+        let invalid = raw !== '' && (parsed === null || parsed < 0);
+        if (!invalid && key === 'lowThreshold' && raw !== '' && parsed > 1) invalid = true;
+        if (invalid) {
+          input.classList.add('is-invalid');
+          return;
+        }
+        input.classList.remove('is-invalid');
+        cfg[key] = raw;
+        saveBattery();
+        const derateEl = root.querySelector('.es-battery-derate');
+        if (derateEl) derateEl.innerHTML = batteryDerateLine(project);
+        if (key === 'shutdownVoltage') syncRatioFromTable();
+        refreshModelAndCompare();
+      });
+    });
+  }
+
   // ---------- 电池可放电容量查询表 ----------
   // 依据关机电压 + 查询表自动回填可放电容量比例(0.2C)；只更新输入框值，不整卡重绘以避免丢焦点。
   // 防抖回调内重新取当前激活项目，避免快速切换项目后 pending 闭包把旧项目数据写进新 DOM。
@@ -1815,14 +1974,17 @@
     const derived = E.deriveDischargeRatio(project);
     const syncEl = root.querySelector('.es-discharge-sync');
     const b = project.battery || {};
-    // Typ 容量变化时，就地刷新查询表「占 Typ 比例」列
+    // Typ 容量变化时，就地刷新矩阵每格的「占 Typ 比例」
     const capTypNow = num(b.capTyp);
-    root.querySelectorAll('[data-es-dt-row]').forEach((tr) => {
-      const row = (b.dischargeTable || []).find((r) => r.id === tr.dataset.esDtRow);
-      const cell = tr.querySelector('.es-dt-ratio');
-      if (!row || !cell) return;
-      const c = num(row.capacityMah);
-      cell.textContent = (capTypNow && capTypNow > 0 && c !== null) ? fmt(c / capTypNow * 100, 2) + '%' : '—';
+    root.querySelectorAll('[data-es-dm-row]').forEach((tr) => {
+      const row = ((b.dischargeMatrix || {}).rows || []).find((r) => r.id === tr.dataset.esDmRow);
+      if (!row) return;
+      tr.querySelectorAll('[data-es-dm-cell]').forEach((input) => {
+        const pct = tr.querySelector('.es-dm-pct[data-es-dm-pct="' + input.dataset.esDmCell + '"]');
+        if (!pct) return;
+        const c = num(input.value);
+        pct.textContent = (capTypNow && capTypNow > 0 && c !== null) ? fmt(c / capTypNow * 100, 1) + '%' : '—';
+      });
     });
     if (!derived.ok) {
       if (syncEl) syncEl.innerHTML = dischargeSyncHint(project, derived.reason);
@@ -1842,15 +2004,8 @@
         ratioInput.value = rounded;
         ratioInput.classList.remove('is-invalid');
       }
-      const threshold = num(b.lowThreshold);
       const derateEl = root.querySelector('.es-battery-derate');
-      if (derateEl) {
-        const capTyp = num(b.capTyp);
-        const avail = capTyp === null ? null : capTyp * rounded;
-        derateEl.innerHTML = '可用容量（公式名「可用容量」= Typ × 可放电比例）= <b>' + fmt(avail, 2)
-          + ' mAh</b>；综合可用电量系数 = 可放电比例 × (1 − 低电量门限) = <b>'
-          + fmt(rounded * (1 - (threshold === null ? 0 : threshold)), 4) + '</b>';
-      }
+      if (derateEl) derateEl.innerHTML = batteryDerateLine(project);
       refreshModelAndCompare();
     }
     if (syncEl) syncEl.innerHTML = dischargeSyncHint(project, derived.ratio === null ? 'no-cap-typ' : '', derived);
@@ -1858,61 +2013,84 @@
 
   function dischargeSyncHint(project, reason, derived) {
     const b = project.battery || {};
-    const table = E.sortDischargeTable(b.dischargeTable);
+    const cfg = projectConfig(project);
+    const matrix = b.dischargeMatrix || { rows: [] };
+    const curve = dischargeCurve(b);
+    const rowCount = (matrix.rows || []).length;
     const base = '<span class="material-symbols-outlined">';
-    if (!table.length) {
-      return base + 'info</span>尚未维护查询表：可导入电池规格书文档自动识别，或点「新增一行」手动维护电压 - 容量点。';
+    if (!curve.length) {
+      return base + 'info</span>尚未维护查询表：可导入电池规格书自动识别，或点「新增一行」按温度 / 放电倍率维护各截止电压的可放电容量。';
     }
     if (reason === 'no-shutdown-voltage') {
-      return base + 'hourglass_top</span>已维护 ' + table.length + ' 个电压点；填写「关机电压」后将自动插值计算可放电容量比例(0.2C)。';
+      return base + 'hourglass_top</span>已维护 ' + rowCount + ' 组温度 / 倍率数据、' + curve.length
+        + ' 个截止电压；填写「项目配置 → 关机电压」后将自动插值计算可放电容量比例(0.2C)。';
     }
     const d = derived || E.deriveDischargeRatio(project);
     if (reason === 'no-cap-typ' || d.reason === 'no-cap-typ') {
-      return base + 'edit_note</span>关机电压 <b>' + escapeHtml(b.shutdownVoltage) + ' V</b> → 可放电容量 <b>' + fmt(d.capacityMah, 2)
+      return base + 'edit_note</span>关机电压 <b>' + escapeHtml(cfg.shutdownVoltage) + ' V</b> → 可放电容量 <b>' + fmt(d.capacityMah, 2)
         + ' mAh</b>；填写电池容量 Typ 后将自动换算并回填比例。';
     }
     if (reason === 'ratio-overflow') {
-      return base + 'warning</span>关机电压 <b>' + escapeHtml(b.shutdownVoltage) + ' V</b> → 可放电容量 <b>' + fmt(d.capacityMah, 2)
+      return base + 'warning</span>关机电压 <b>' + escapeHtml(cfg.shutdownVoltage) + ' V</b> → 可放电容量 <b>' + fmt(d.capacityMah, 2)
         + ' mAh</b>，占 Typ 容量 <b>' + fmt(d.ratio * 100, 2) + '%</b>，超过 100%，未自动回填；请检查查询表容量或 Typ 容量是否填写正确。';
     }
-    return base + 'check_circle</span>关机电压 <b>' + escapeHtml(b.shutdownVoltage) + ' V</b> → 可放电容量 <b>' + fmt(d.capacityMah, 2)
+    return base + 'check_circle</span>关机电压 <b>' + escapeHtml(cfg.shutdownVoltage) + ' V</b> → 可放电容量 <b>' + fmt(d.capacityMah, 2)
       + ' mAh</b>（线性插值）→ 占 Typ 容量 <b>' + fmt(d.ratio * 100, 2) + '%</b>，已自动回填「可放电容量比例(0.2C)」。';
   }
 
   function renderDischargeCard(project) {
     const b = project.battery || {};
+    const matrix = b.dischargeMatrix || { voltages: DEFAULT_CUTOFF_VOLTAGES.slice(), rows: [] };
+    const voltages = matrixVoltages(matrix);
     const capTyp = num(b.capTyp);
-    // 有效点按电压降序展示；尚未填完的空行追加在末尾，保证「新增一行」立即可见
-    const validRows = E.sortDischargeTable(b.dischargeTable);
-    const blankRows = (b.dischargeTable || []).filter((r) => num(r.voltage) === null || num(r.capacityMah) === null);
-    const rows = validRows.concat(blankRows);
-    const body = rows.length ? rows.map((r) => {
-      const v = num(r.voltage);
-      const c = num(r.capacityMah);
-      const ratio = capTyp && capTyp > 0 && c !== null ? c / capTyp : null;
-      return '<tr data-es-dt-row="' + escapeHtml(r.id) + '">'
-        + '<td><input type="text" inputmode="decimal" class="es-dt-input" data-es-dt-col="voltage"'
-        + ' value="' + escapeHtml(r.voltage === undefined || r.voltage === null ? '' : r.voltage) + '" placeholder="示例：3.4" autocomplete="off" /></td>'
-        + '<td><input type="text" inputmode="decimal" class="es-dt-input" data-es-dt-col="capacityMah"'
-        + ' value="' + escapeHtml(r.capacityMah === undefined || r.capacityMah === null ? '' : r.capacityMah) + '" placeholder="示例：233.7" autocomplete="off" /></td>'
-        + '<td class="es-dt-ratio">' + (ratio === null ? '—' : fmt(ratio * 100, 2) + '%') + '</td>'
-        + '<td><button type="button" class="es-icon-btn es-icon-danger" data-es-dt-delete="' + escapeHtml(r.id)
+    const derived = E.deriveDischargeRatio(project);
+    const rows = matrix.rows || [];
+    const pctOf = (v) => {
+      const c = num(v);
+      return (capTyp && capTyp > 0 && c !== null) ? fmt(c / capTyp * 100, 1) + '%' : '—';
+    };
+    const body = rows.length ? rows.map((row) => {
+      const cells = voltages.map((v) => {
+        const val = matrixCellValue(row, v);
+        return '<td class="es-dm-cell">'
+          + '<input type="text" inputmode="decimal" class="es-dt-input" data-es-dm-cell="' + v + '"'
+          + ' value="' + escapeHtml(val === null ? '' : val) + '" placeholder="mAh" autocomplete="off" />'
+          + '<span class="es-dm-pct" data-es-dm-pct="' + v + '">' + pctOf(val) + '</span>'
+          + '</td>';
+      }).join('');
+      return '<tr data-es-dm-row="' + escapeHtml(row.id) + '">'
+        + '<td><input type="text" class="es-dt-input" data-es-dm-col="temp" value="'
+        + escapeHtml(row.temp === undefined || row.temp === null ? '' : row.temp) + '" placeholder="示例：25度" autocomplete="off" /></td>'
+        + '<td><input type="text" class="es-dt-input" data-es-dm-col="cRate" value="'
+        + escapeHtml(row.cRate === undefined || row.cRate === null ? '' : row.cRate) + '" placeholder="示例：0.2C" autocomplete="off" /></td>'
+        + cells
+        + '<td><button type="button" class="es-icon-btn es-icon-danger" data-es-dm-delete="' + escapeHtml(row.id)
         + '" title="删除该行"><span class="material-symbols-outlined">close</span></button></td>'
         + '</tr>';
-    }).join('') : '<tr><td colspan="4" class="es-table-empty">暂无数据，导入文档或手动新增电压 - 容量点</td></tr>';
-    const derived = E.deriveDischargeRatio(project);
+    }).join('') : '<tr><td colspan="' + (voltages.length + 3)
+      + '" class="es-table-empty">暂无数据，导入电池规格书或点「新增一行」维护温度 / 放电倍率下的可放电容量</td></tr>';
+
+    const headVoltages = voltages.map((v) => '<th class="es-dm-vhead">'
+      + '<span class="es-dm-vwrap"><input type="text" inputmode="decimal" class="es-dm-vinput" data-es-dm-voltage="' + v
+      + '" value="' + escapeHtml(v) + '" autocomplete="off" /><small>V</small>'
+      + '<button type="button" class="es-icon-btn es-icon-danger es-dm-vdel" data-es-dm-vdel="' + v
+      + '" title="删除该电压列"><span class="material-symbols-outlined">close</span></button></span></th>').join('');
+
     return '<div class="es-submodule es-discharge-sub">'
       + '<div class="es-submodule-head"><h4><span class="material-symbols-outlined">table_chart</span>电池可放电容量查询表</h4>'
       + '<div class="es-head-actions">'
       + '<button type="button" class="template-btn template-btn-sm" data-es-dt-import><span class="material-symbols-outlined text-sm">upload_file</span>导入文档自动识别</button>'
       + '<input type="file" accept=".xlsx,.xls,.csv" hidden data-es-dt-file />'
       + '<button type="button" class="template-btn template-btn-sm" data-es-dt-add><span class="material-symbols-outlined text-sm">add</span>新增一行</button>'
+      + '<button type="button" class="template-btn template-btn-sm" data-es-dt-add-v><span class="material-symbols-outlined text-sm">add_column_right</span>新增电压列</button>'
       + '<button type="button" class="template-btn template-btn-sm template-btn-danger" data-es-dt-clear><span class="material-symbols-outlined text-sm">delete_sweep</span>清空</button>'
       + '</div></div>'
-      + '<p class="es-discharge-tip">容量列指电池从满电放电至该电压时<b>累计可放出的容量（mAh）</b>；导入「剩余容量 / SOC」类表格时会自动按 Typ 容量换算，支持 .xlsx / .xls / .csv。</p>'
-      + '<div class="es-table-wrap"><table class="es-table es-discharge-table"><thead><tr>'
-      + '<th>电压 V</th><th>可放电容量 mAh</th><th>占 Typ 比例</th><th style="width:64px">操作</th>'
-      + '</tr></thead><tbody>' + body + '</tbody></table></div>'
+      + '<p class="es-discharge-tip">按电池规格书格式维护：每行一个「温度 + 放电倍率」，各截止电压列填<b>从满电放至该电压的累计可放电容量（mAh）</b>，格内小字为占 Typ 容量比例。可放电比例按 0.2C 行插值，支持 .xlsx / .xls / .csv 导入。</p>'
+      + '<div class="es-table-wrap"><table class="es-table es-discharge-table es-matrix-table"><thead>'
+      + '<tr><th rowspan="2">温度</th><th rowspan="2">放电倍率</th>'
+      + '<th colspan="' + voltages.length + '">截止电压（可放电 mAh / 占 Typ）</th><th rowspan="2" style="width:56px">操作</th></tr>'
+      + '<tr>' + headVoltages + '</tr>'
+      + '</thead><tbody>' + body + '</tbody></table></div>'
       + '<p class="es-discharge-sync">' + dischargeSyncHint(project, derived.reason, derived.ok ? derived : null) + '</p>'
       + '</div>';
   }
@@ -1920,6 +2098,14 @@
   function bindDischargeCard(project) {
     const b = project.battery || (project.battery = E.defaultBattery());
     if (!Array.isArray(b.dischargeTable)) b.dischargeTable = [];
+    if (!b.dischargeMatrix || typeof b.dischargeMatrix !== 'object') {
+      b.dischargeMatrix = { voltages: DEFAULT_CUTOFF_VOLTAGES.slice(), rows: [] };
+    }
+    if (!Array.isArray(b.dischargeMatrix.rows)) b.dischargeMatrix.rows = [];
+    if (!Array.isArray(b.dischargeMatrix.voltages) || !b.dischargeMatrix.voltages.length) {
+      b.dischargeMatrix.voltages = DEFAULT_CUTOFF_VOLTAGES.slice();
+    }
+    const matrix = b.dischargeMatrix;
 
     const fileInput = root.querySelector('[data-es-dt-file]');
     root.querySelector('[data-es-dt-import]').addEventListener('click', () => fileInput.click());
@@ -1929,12 +2115,18 @@
       if (!file) return;
       try {
         const parsed = await parseDischargeFile(file, num(b.capTyp));
-        b.dischargeTable = parsed.rows.map((r) => ({ id: uid('dt'), voltage: r.voltage, capacityMah: r.capacityMah }));
+        // 导入的电压 - 容量点作为「25度 / 0.2C」一行并入矩阵，并对齐矩阵电压列
+        const voltages = parsed.rows.map((r) => r.voltage);
+        matrixVoltages(matrix).forEach((v) => { if (voltages.indexOf(v) === -1) voltages.push(v); });
+        matrix.voltages = voltages.sort((x, y) => x - y);
+        const mah = {};
+        parsed.rows.forEach((r) => { mah[String(r.voltage)] = r.capacityMah; });
+        matrix.rows = [{ id: uid('dt'), temp: '25度', cRate: '0.2C', mah: mah }];
         E.store.save();
         render();
         await window.ES_MODAL.alert({
           title: '导入成功', icon: 'check_circle',
-          message: '从「' + parsed.sheetName + '」导入 ' + parsed.rows.length + ' 个电压点。\n' + parsed.note,
+          message: '从「' + parsed.sheetName + '」导入 ' + parsed.rows.length + ' 个截止电压容量，作为「25度 / 0.2C」一行。\n' + parsed.note,
         });
         syncRatioFromTable();
       } catch (error) {
@@ -1946,37 +2138,108 @@
     });
 
     root.querySelector('[data-es-dt-add]').addEventListener('click', () => {
-      b.dischargeTable.push({ id: uid('dt'), voltage: '', capacityMah: '' });
-      E.store.save();
-      render();
-    });
-    root.querySelector('[data-es-dt-clear]').addEventListener('click', async () => {
-      if (!b.dischargeTable.length) return;
-      const ok = await window.ES_MODAL.confirm({
-        title: '清空查询表', icon: 'delete_sweep',
-        message: '确认清空电池可放电容量查询表？',
-        confirmText: '清空',
-      });
-      if (!ok) return;
-      b.dischargeTable = [];
+      const cells = {};
+      matrixVoltages(matrix).forEach((v) => { cells[String(v)] = ''; });
+      const last = matrix.rows[matrix.rows.length - 1];
+      matrix.rows.push({ id: uid('dt'), temp: last ? last.temp : '25度', cRate: last ? last.cRate : '0.2C', mah: cells });
       E.store.save();
       render();
     });
 
-    root.querySelectorAll('[data-es-dt-delete]').forEach((btn) => {
+    root.querySelector('[data-es-dt-add-v]').addEventListener('click', () => {
+      const vs = matrixVoltages(matrix);
+      const next = vs.length ? Math.round((vs[vs.length - 1] + 0.1) * 100) / 100 : DEFAULT_CUTOFF_VOLTAGES[0];
+      matrix.voltages = vs.concat([next]);
+      matrix.rows.forEach((row) => { matrixSetCell(row, next, ''); });
+      E.store.save();
+      render();
+    });
+
+    root.querySelector('[data-es-dt-clear]').addEventListener('click', async () => {
+      if (!matrix.rows.length) return;
+      const ok = await window.ES_MODAL.confirm({
+        title: '清空查询表', icon: 'delete_sweep',
+        message: '确认清空电池可放电容量查询表？（电压列会保留）',
+        confirmText: '清空',
+      });
+      if (!ok) return;
+      matrix.rows = [];
+      E.store.save();
+      render();
+      syncRatioFromTable();
+    });
+
+    root.querySelectorAll('[data-es-dm-delete]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        b.dischargeTable = b.dischargeTable.filter((r) => r.id !== btn.dataset.esDtDelete);
+        matrix.rows = matrix.rows.filter((r) => r.id !== btn.dataset.esDmDelete);
         E.store.save();
         render();
         syncRatioFromTable();
       });
     });
 
-    // 行内编辑：非法值标红不入库；失焦后重排（按电压降序）并重算
-    root.querySelectorAll('.es-dt-input').forEach((input) => {
+    // 删除某一电压列（同时删除所有行里对应的容量）
+    root.querySelectorAll('[data-es-dm-vdel]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = num(btn.dataset.esDmVdel);
+        if (v === null) return;
+        matrix.voltages = matrixVoltages(matrix).filter((x) => x !== v);
+        matrix.rows.forEach((row) => {
+          const cells = matrixCells(row);
+          Object.keys(cells).forEach((k) => { if (num(k) === v) delete cells[k]; });
+        });
+        E.store.save();
+        render();
+        syncRatioFromTable();
+      });
+    });
+
+    // 电压列表头编辑：改完（回车 / 失焦）后重映射所有行的 key
+    root.querySelectorAll('[data-es-dm-voltage]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const from = num(input.dataset.esDmVoltage);
+        const to = num(input.value);
+        const list = matrixVoltages(matrix);
+        if (to === null || to <= 0 || (from !== null && list.indexOf(to) !== -1 && to !== from)) {
+          input.classList.add('is-invalid');
+          input.value = input.dataset.esDmVoltage;
+          return;
+        }
+        input.classList.remove('is-invalid');
+        matrix.voltages = list.map((v) => (v === from ? to : v));
+        if (from !== null) {
+          matrix.rows.forEach((row) => {
+            const cells = matrixCells(row);
+            Object.keys(cells).forEach((k) => {
+              if (num(k) === from) {
+                const val = cells[k];
+                delete cells[k];
+                cells[String(to)] = val;
+              }
+            });
+          });
+        }
+        E.store.save();
+        render();
+        syncRatioFromTable();
+      });
+    });
+
+    // 行内编辑：温度 / 倍率 / 各截止电压容量；非法值标红不入库
+    root.querySelectorAll('[data-es-dm-col]').forEach((input) => {
       input.addEventListener('input', () => {
-        const tr = input.closest('[data-es-dt-row]');
-        const row = b.dischargeTable.find((r) => r.id === tr.dataset.esDtRow);
+        const tr = input.closest('[data-es-dm-row]');
+        const row = matrix.rows.find((r) => r.id === tr.dataset.esDmRow);
+        if (!row) return;
+        row[input.dataset.esDmCol] = input.value;
+        E.store.save();
+      });
+    });
+
+    root.querySelectorAll('[data-es-dm-cell]').forEach((input) => {
+      input.addEventListener('input', () => {
+        const tr = input.closest('[data-es-dm-row]');
+        const row = matrix.rows.find((r) => r.id === tr.dataset.esDmRow);
         if (!row) return;
         const raw = input.value.trim();
         const parsed = raw === '' ? '' : num(raw);
@@ -1985,28 +2248,12 @@
           return;
         }
         input.classList.remove('is-invalid');
-        row[input.dataset.esDtCol] = raw;
+        matrixSetCell(row, input.dataset.esDmCell, raw);
         E.store.save();
-        // 就地更新该行占比
         const capTyp = num(b.capTyp);
-        const ratioCell = tr.querySelector('.es-dt-ratio');
-        const v = num(row.voltage);
-        const c = num(row.capacityMah);
-        if (ratioCell) ratioCell.textContent = (capTyp && capTyp > 0 && v !== null && c !== null) ? fmt(c / capTyp * 100, 2) + '%' : '—';
+        const pct = tr.querySelector('.es-dm-pct[data-es-dm-pct="' + input.dataset.esDmCell + '"]');
+        if (pct) pct.textContent = (capTyp && capTyp > 0 && parsed !== '') ? fmt(parsed / capTyp * 100, 1) + '%' : '—';
         syncRatioFromTable();
-      });
-      input.addEventListener('blur', () => {
-        if (input.classList.contains('is-invalid')) return;
-        // 失焦后按电压降序重排有效点（空行保留在末尾），顺序未变则不重绘以免打断操作
-        const valid = b.dischargeTable.filter((r) => num(r.voltage) !== null && num(r.capacityMah) !== null);
-        const blanks = b.dischargeTable.filter((r) => num(r.voltage) === null || num(r.capacityMah) === null);
-        const sortedValid = E.sortDischargeTable(valid);
-        const orderChanged = sortedValid.some((r, i) => r.id !== valid[i].id);
-        if (orderChanged) {
-          b.dischargeTable = sortedValid.concat(blanks);
-          E.store.save();
-          render();
-        }
       });
     });
   }
