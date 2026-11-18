@@ -1325,23 +1325,55 @@ body.es-col-resizing * { user-select: none !important; }
 }
 .es-excel-grid .is-editing.is-error input { background: #fef2f2; }
 
-/* 行号内删除按钮：默认隐藏，悬停该行时出现 */
-.es-excel-grid .es-excel-rownum { position: relative; }
-.es-row-del-btn {
-  display: none;
+/* 行号格（v62 方案 B）：行号列加宽到 58px，行号 / ＋ / ✕ 三个槽位常驻，
+   按钮不再依赖 hover 才出现，也不会被相邻单元格盖住（触屏设备同样可点） */
+.es-excel-grid .es-excel-rownum { position: relative; padding: 0 .18rem; }
+.es-rownum-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1px;
+  width: 100%;
+  min-width: 0;
+}
+.es-rownum-inner .es-rownum-num {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+/* 插入 / 删除按钮：同一套常驻规格，默认半透明降低视觉噪音，行悬停或自由行时满不透明 */
+.es-row-del-btn,
+.es-row-insert-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
   border: 0;
+  border-radius: 3px;
   background: transparent;
-  color: #ef4444;
   font-size: .72rem;
+  font-weight: 800;
   line-height: 1;
   cursor: pointer;
-  padding: .05rem .12rem;
-  border-radius: 3px;
-  font-weight: 800;
+  opacity: .45;
+  transition: opacity .12s ease, background-color .12s ease;
 }
 .es-excel-grid tr:hover .es-row-del-btn,
-.es-excel-grid .es-excel-rownum.is-free-row .es-row-del-btn { display: inline-block; }
+.es-excel-grid tr:hover .es-row-insert-btn,
+.es-excel-grid .es-excel-rownum.is-free-row .es-row-del-btn,
+.es-excel-grid .es-excel-rownum.is-free-row .es-row-insert-btn { opacity: 1; }
+.es-row-del-btn { color: #ef4444; }
+.es-row-insert-btn { color: #2563eb; }
 .es-row-del-btn:hover { background: #fee2e2; }
+.es-row-insert-btn:hover { background: #dbeafe; }
+.es-row-insert-btn .material-symbols-outlined {
+  font-size: .82rem;
+  line-height: 1;
+}
 .es-rownum-num { font-weight: 800; }
 
 /* 自动平均电流（未自定义）用淡灰与自定义值区分 */
@@ -1354,8 +1386,26 @@ body.es-col-resizing * { user-select: none !important; }
   .es-current-edit-input { padding: .24rem .12rem; }
 }
 
-/* ===== v52 全开放网格：B 电流 / 备注引用 / 自由行插入 ===== */
-.es-excel-grid .es-current-cell { min-width: 92px; }
+/* ===== v62：B 目标电流（只读镜像场景电流） / 汇总行 C 占位 ===== */
+.es-excel-grid .es-target-head { color: #64748b; }
+.es-excel-grid .es-target-cell {
+  background: #f8fafc;
+  color: #475569;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+.es-excel-grid .es-stat-gap { background: #f8fafc; border-bottom: 1px solid #eef2f7; }
+/* 点击只读的目标电流格：滚动到场景电流行并短暂高亮，提示真正的编辑入口 */
+.es-scenario-table tr.is-flash > td { animation: es-row-flash 1.4s ease-out; }
+@keyframes es-row-flash {
+  0% { background-color: #dbeafe; }
+  100% { background-color: transparent; }
+}
+
+/* ===== v52 全开放网格：C 电流 / 备注引用 / 自由行插入（按钮规格见上方 v62 行号格） ===== */
+.es-excel-grid .es-current-cell { min-width: 0; }
 .es-excel-grid td.es-current-cell:hover { background-color: #eef4ff; }
 .es-excel-grid .es-current-cell.es-avg-auto .es-cell-text { color: #94a3b8; }
 .es-excel-grid .es-note-cell input { font-weight: 600; }
@@ -1363,30 +1413,8 @@ body.es-col-resizing * { user-select: none !important; }
   box-shadow: inset 0 0 0 1px #ef4444;
   background: #fef2f2;
 }
-.es-row-insert-btn {
-  display: none;
-  border: 0;
-  background: transparent;
-  color: #2563eb;
-  font-size: .72rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: .05rem .1rem;
-  border-radius: 3px;
-  font-weight: 800;
-}
-.es-row-insert-btn .material-symbols-outlined {
-  font-size: .82rem;
-  line-height: 1;
-}
-.es-excel-grid tr:hover .es-row-insert-btn,
-.es-excel-grid .es-excel-rownum.is-free-row .es-row-insert-btn { display: inline-block; }
-.es-row-insert-btn:hover { background: #dbeafe; }
-.es-excel-grid .is-editing .es-row-insert-btn,
-.es-excel-grid .is-editing .es-row-del-btn { display: none; }
 
 @media (max-width: 640px) {
-  .es-excel-grid .es-current-cell { min-width: 72px; }
   .es-row-insert-btn,
-  .es-row-del-btn { padding: .03rem .08rem; }
+  .es-row-del-btn { width: 16px; height: 16px; }
 }

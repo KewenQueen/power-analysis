@@ -219,7 +219,7 @@
       return { id: uid('mr'), scenarioId: scenario.id, label: '', currentRaw: '', note: '', cells: cells };
     });
     return {
-      v: 3, footerVersion: 2, id: uid('m'), name: name, columns: columns, rows: rows,
+      v: 3, footerVersion: 2, addrScheme: 2, id: uid('m'), name: name, columns: columns, rows: rows,
       foot: foot, footer: defaultModelFooter(),
     };
   }
@@ -247,7 +247,7 @@
       return { id: uid('mr'), scenarioId: oldRow.scenarioId, label: '', currentRaw: '', note: oldRow.note || '', cells: cells };
     });
     return {
-      v: 2, footerVersion: 2, id: model.id, name: model.name, columns: columns, rows: rows,
+      v: 2, footerVersion: 2, addrScheme: 2, id: model.id, name: model.name, columns: columns, rows: rows,
       foot: foot, footer: defaultModelFooter(),
     };
   }
@@ -348,12 +348,13 @@
 
   // ---------- DOU 网格布局偏好（列宽 / 行高），独立 localStorage，不与业务数据混存 ----------
   const GRID_LAYOUT_KEY = 'endurance_grid_layout_v1';
-  const GRID_COL_ROLES = ['rownum', 'scenario', 'current', 'duration', 'mah', 'note'];
-  // 桌面默认列宽（px）：紧凑、按内容收缩，不强制撑满容器；note 为电流列之后的备注/说明列
-  const GRID_DEFAULT_COLW = { rownum: 38, scenario: 150, current: 82, duration: 94, mah: 102, note: 160 };
-  const GRID_MOBILE_COLW = { rownum: 30, scenario: 116, current: 64, duration: 78, mah: 86, note: 120 };
-  const GRID_COL_MIN = { rownum: 28, scenario: 88, current: 56, duration: 60, mah: 64, note: 80 };
-  const GRID_COL_MAX = { rownum: 96, scenario: 320, current: 170, duration: 220, mah: 240, note: 340 };
+  const GRID_COL_ROLES = ['rownum', 'scenario', 'target', 'current', 'duration', 'mah', 'note'];
+  // 桌面默认列宽（px）：紧凑、按内容收缩，不强制撑满容器；target = 目标电流（只读，取场景电流）
+  // rownum 58 起：行号 + 插入 + 删除 三个槽位常驻，避免按钮被相邻单元格盖掉
+  const GRID_DEFAULT_COLW = { rownum: 58, scenario: 150, target: 92, current: 82, duration: 94, mah: 102, note: 160 };
+  const GRID_MOBILE_COLW = { rownum: 56, scenario: 116, target: 78, current: 64, duration: 78, mah: 86, note: 120 };
+  const GRID_COL_MIN = { rownum: 56, scenario: 88, target: 64, current: 56, duration: 60, mah: 64, note: 80 };
+  const GRID_COL_MAX = { rownum: 96, scenario: 320, target: 150, current: 170, duration: 220, mah: 240, note: 340 };
   // 三档行高（px），用户可在工具栏切换
   const GRID_ROW_H = { compact: 30, normal: 38, comfortable: 48 };
   const GRID_DEFAULT_ROWH = 'normal';
@@ -374,7 +375,9 @@
         const cw = parsed && parsed.colWidths && typeof parsed.colWidths === 'object' ? parsed.colWidths : {};
         GRID_COL_ROLES.forEach((role) => {
           const v = Number(cw[role]);
-          if (Number.isFinite(v) && v > 0) base.colWidths[role] = Math.round(v);
+          // 旧布局的存量宽度也要过一遍上下限：v62 行号列最小 56（行号 + ＋ + ✕ 三槽位），
+          // 早期存的 38 / 30 必须抬上来，否则按钮会被挤掉
+          if (Number.isFinite(v) && v > 0) base.colWidths[role] = clampGridColWidth(role, v);
         });
         if (parsed && Object.prototype.hasOwnProperty.call(GRID_ROW_H, parsed.rowHeight)) base.rowHeight = parsed.rowHeight;
       }
@@ -549,6 +552,11 @@
           if (migrated.footerVersion !== 2) {
             migrateFooterAddressesV52ToV53(migrated);
             migrated.footerVersion = 2;
+            changed = true;
+          }
+          if (migrated.addrScheme !== 2) {
+            // 列迁移必须在汇总行迁移之后：先按旧行列修地址，再统一右移列字母
+            migrateGridColumnsV62(migrated);
             changed = true;
           }
           return migrated;
@@ -895,15 +903,15 @@
   }
 
   // ---------- A1 网格映射（v3：物理列与公式地址统一，列标连续无空白）----------
-  // 物理/公式列：1=A 场景名，2=B 电流；第 i 个对比列（0-based）模块占三列：
-  //   时长列 (3+3i) / 耗电列 (4+3i) / 备注列 (5+3i，可被引用，文本参与数值运算时记 #VALUE!)。
+  // 物理/公式列（v62）：1=A 场景名，2=B 目标电流（只读，取场景电流），3=C 电流；
+  // 第 i 个对比列（0-based）模块占三列：时长列 (4+3i) / 耗电列 (5+3i) / 备注列 (6+3i，可被引用)。
   // 第 1 行表头，场景行从第 2 行开始，其后依次为 Total、平均电流、Typ、Min 四个连续汇总行。
   function colLetterFor(colIndex, cellType) {
-    return window.ES_FORMULA.colToLetter(3 + colIndex * 3 + (cellType === 'm' ? 1 : 0));
+    return window.ES_FORMULA.colToLetter(4 + colIndex * 3 + (cellType === 'm' ? 1 : 0));
   }
   // 备注列字母（v52 起备注可被 A1 引用，也支持数字或 = 公式）
   function noteLetterFor(colIndex) {
-    return window.ES_FORMULA.colToLetter(5 + colIndex * 3);
+    return window.ES_FORMULA.colToLetter(6 + colIndex * 3);
   }
   function rowNumberFor(rowIndex) { return 2 + rowIndex; }
   function totalRowNumber(model) { return 2 + model.rows.length; }
@@ -917,9 +925,13 @@
     return douRowNumber(model);
   }
   function addressOf(model, desc) {
-    if (desc.kind === 'current') {
+    if (desc.kind === 'target') {
       const rowIndex = model.rows.findIndex((r) => r.id === desc.rowId);
       return rowIndex < 0 ? '' : 'B' + rowNumberFor(rowIndex);
+    }
+    if (desc.kind === 'current') {
+      const rowIndex = model.rows.findIndex((r) => r.id === desc.rowId);
+      return rowIndex < 0 ? '' : 'C' + rowNumberFor(rowIndex);
     }
     if (desc.kind === 'note') {
       const colIndex = model.columns.findIndex((c) => c.id === desc.colId);
@@ -927,7 +939,7 @@
       return (colIndex < 0 || rowIndex < 0) ? '' : noteLetterFor(colIndex) + rowNumberFor(rowIndex);
     }
     if (desc.kind === 'footerLabel') return 'A' + footerRowNumber(model, desc.rowKey);
-    if (desc.kind === 'footerCurrent') return 'B' + footerRowNumber(model, desc.rowKey);
+    if (desc.kind === 'footerCurrent') return 'C' + footerRowNumber(model, desc.rowKey);
     const colIndex = model.columns.findIndex((c) => c.id === desc.colId);
     if (colIndex < 0) return '';
     if (desc.kind === 'cell') {
@@ -1034,6 +1046,15 @@
       });
     }
   }
+  // v62：A/B 之间插入「目标电流」列（B），原 B 电流及右侧模块列整体 +1 字母；
+  // 只改以 = 开头的公式串，普通文本备注不动，避免误伤「A4」「B2」这类正文。
+  function migrateGridColumnsV62(model) {
+    walkModelFormulaRaws(model, (raw) => rewriteA1Tokens(raw, (ref) => (
+      ref.col >= 2 ? { col: ref.col + 1, row: ref.row } : ref
+    )));
+    model.addrScheme = 2;
+  }
+
   // 删除第 deletedDataIndex 个数据行（0-based）后：
   //   指向被删行 → (1/0)；指向其下方的行号整体 -1；上方不动。列字母保持不变。
   function rewriteRefsAfterRowDelete(model, deletedDataIndex) {
@@ -1071,9 +1092,9 @@
   // 删除第 moduleIndex 个对比列模块（每个模块占 3 个物理列：时长/耗电/备注）后：
   //   指向被删模块三列 → (1/0)；指向其右侧模块的列整体 -3；左侧不动。行号保持不变。
   function rewriteRefsAfterModuleDelete(model, moduleIndex) {
-    const base = 3 + moduleIndex * 3; // 该模块时长列的物理列号（1-based）
+    const base = 4 + moduleIndex * 3; // 该模块时长列的物理列号（v62：D=4 起，A/B/C 为场景/目标电流/电流）
     walkModelFormulaRaws(model, (raw) => rewriteA1Tokens(raw, (ref) => {
-      if (ref.col < 3) return ref; // A 场景名 / B 电流列不参与模块位移
+      if (ref.col < 4) return ref; // A 场景名 / B 目标电流 / C 电流列不参与模块位移
       if (ref.col >= base && ref.col <= base + 2) return null;
       if (ref.col >= base + 3) return { col: ref.col - 3, row: ref.row };
       return ref;
@@ -1170,21 +1191,25 @@
     }
 
     // A1 地址 -> 单元格描述（v3 连续地址；v52 起 B 电流、备注列也可被引用）
-    // col1=A 场景名（文本标签，不参与公式），col2=B 电流（自由：数字/文字/公式），
-    // 模型模块 i 占 3+3i 起三列：时长 / 耗电 / 备注（备注可引用，文本在数值运算中记 #VALUE!）。
+    // v62：col1=A 场景名（文本标签，不参与公式），col2=B 目标电流（只读镜像场景电流），col3=C 电流（自由：数字/文字/公式）；
+    // 模型模块 i 占 4+3i 起三列：时长 / 耗电 / 备注（备注可引用，文本在数值运算中记 #VALUE!）。
     function refToDesc(ref) {
       if (ref.col === 1) {
         const footerKey = { [totalRow]: 'total', [avgRow]: 'avg', [douRow]: 'douTyp', [minRow]: 'douMin' }[ref.row];
         return footerKey ? { kind: 'footerLabel', rowKey: footerKey } : null;
       }
       if (ref.col === 2) {
-        // B 电流列：数据行为场景/自由行电流；四个汇总行也各自可编辑
+        // B 目标电流：只读镜像场景电流（不可编辑，也不能作为写入目标）
+        return (ref.row >= 2 && ref.row <= 1 + n) ? { kind: 'target', rowId: model.rows[ref.row - 2].id } : null;
+      }
+      if (ref.col === 3) {
+        // C 电流列：数据行为场景/自由行电流；四个汇总行也各自可编辑
         if (ref.row >= 2 && ref.row <= 1 + n) return { kind: 'current', rowId: model.rows[ref.row - 2].id };
         const footerKey = { [totalRow]: 'total', [avgRow]: 'avg', [douRow]: 'douTyp', [minRow]: 'douMin' }[ref.row];
         return footerKey ? { kind: 'footerCurrent', rowKey: footerKey } : null;
       }
-      const offset = (ref.col - 3) % 3;
-      const ci = Math.floor((ref.col - 3) / 3);
+      const offset = (ref.col - 4) % 3;
+      const ci = Math.floor((ref.col - 4) / 3);
       if (ci >= model.columns.length) return null;
       const colId = model.columns[ci].id;
       if (ref.row >= 2 && ref.row <= 1 + n) {
@@ -1207,6 +1232,16 @@
       if (cache.has(key)) return cache.get(key);
       if (visiting[key]) return { ok: false, error: ET.CYCLE };
       visiting[key] = true;
+
+      // B 目标电流：直接取该行场景的共享电流（自定义电流优先，否则最新测试记录），不做任何存储
+      if (desc.kind === 'target') {
+        const targetRow = model.rows.find((r) => r.id === desc.rowId) || null;
+        const current = targetRow ? scenarioCurrent(project, targetRow.scenarioId) : null;
+        const res = current === null ? { ok: true, empty: true, value: null } : { ok: true, value: current };
+        delete visiting[key];
+        cache.set(key, res);
+        return res;
+      }
 
       let raw = '';
       let scopeRow = null;
@@ -1287,7 +1322,7 @@
             for (let cc = a.col; cc <= b.col; cc += 1) {
               // 合并区：单点引用右侧仍取同一个值，但区间聚合时右侧按 Excel 合并语义视为空，避免重复计数
               const mergedRight = (rr === avgRow || rr === douRow || rr === minRow)
-                && cc >= 3 && (cc - 3) % 3 === 1;
+                && cc >= 4 && (cc - 4) % 3 === 1;
               if (mergedRight) { refs.push(null); continue; }
               const target = refToDesc({ col: cc, row: rr, label: '' });
               if (!target) { refs.push({ type: ET.REF }); continue; }
@@ -1306,12 +1341,12 @@
           }
           if (name === '电流' || name === '本行电流' || name === '场景电流') {
             if (!scopeRow) return { type: ET.REF };
-            // 在 B 电流格自身的公式里，「电流」取场景共享电流（避免自引用循环，便于写 =电流*1.1 这类公式）
+            // 在 C 电流格自身的公式里，「电流」取场景共享电流（避免自引用循环，便于写 =电流*1.1 这类公式）
             if (desc.kind === 'current') {
               const base = scenarioCurrent(project, scopeRow.scenarioId);
               return base === null ? { type: ET.REF } : base;
             }
-            // 其它格引用「电流」：B 列有自由覆盖（数字/文字/公式）时取覆盖值，否则回退场景共享电流
+            // 其它格引用「电流」：C 列有自由覆盖（数字/文字/公式）时取覆盖值，否则回退场景共享电流
             if (String(scopeRow.currentRaw || '').trim() !== '') {
               return valueOrError(evalCell({ kind: 'current', rowId: scopeRow.id }, visiting));
             }
@@ -1368,7 +1403,8 @@
       evalCell({ kind: 'footerCurrent', rowKey }, {});
     });
     model.rows.forEach((row) => {
-      evalCell({ kind: 'current', rowId: row.id }, {}); // 预热 B 电流（含留空回退），供网格直接 result()
+      evalCell({ kind: 'target', rowId: row.id }, {}); // 预热 B 目标电流镜像，供网格直接 result()
+      evalCell({ kind: 'current', rowId: row.id }, {}); // 预热 C 电流（含留空回退），供网格直接 result()
       model.columns.forEach((col) => {
         evalCell({ kind: 'cell', rowId: row.id, colId: col.id, t: 'd' }, {});
         evalCell({ kind: 'cell', rowId: row.id, colId: col.id, t: 'm' }, {});
@@ -3046,10 +3082,21 @@
       + '<button type="button" class="es-fx-btn" data-es-fx="' + escapeHtml(descKey(desc)) + '" title="在公式编辑器中打开 ' + escapeHtml(addr) + '">fx</button></td>';
   }
 
+  // B 目标电流（v62）：只读镜像该行场景电流；不提供 fx / 编辑入口，公式引用 B2 得到同一数值
   // B 电流格（v52 全开放）：默认回退场景共享电流（灰色自动态）；填入数字 / 文字 / 公式后按本模型自由覆盖
+  function targetCellHtml(ev, model, row) {
+    const desc = { kind: 'target', rowId: row.id };
+    const r = ev.result(desc);
+    const addr = E.addressOf(model, desc);
+    const text = r.ok && !r.empty ? fmt(r.value, 2) : '—';
+    return '<td class="es-target-cell" data-es-target-row="' + escapeHtml(row.id)
+      + '" title="地址 ' + escapeHtml(addr) + '：目标电流 = 场景电流（只读镜像；修改场景电流请到上方场景卡片）">'
+      + '<span class="es-target-value">' + escapeHtml(text) + '</span></td>';
+  }
+
   function currentCellHtml(ev, model, row, rowIndex) {
     const desc = { kind: 'current', rowId: row.id };
-    const addr = 'B' + E.rowNumberFor(rowIndex);
+    const addr = 'C' + E.rowNumberFor(rowIndex);
     const raw = getRaw(model, desc);
     const trimmed = String(raw || '').trim();
     if (trimmed === '') {
@@ -3105,13 +3152,14 @@
     const colEl = (role, cls) => '<col class="' + cls + '" data-col-role="' + role
       + '" style="width:' + layout.colWidths[role] + 'px; min-width:' + layout.colWidths[role] + 'px" />';
 
-    // Excel 风格列标行（v3 连续地址，无空白列）：A=场景、B=电流；每个模型模块按时长 / 耗电 / 备注连续给字母
+    // Excel 风格列标行（v62 连续地址，无空白列）：A=场景、B=目标电流、C=电流；每个模型模块按时长 / 耗电 / 备注连续给字母
     const resizeHandle = (role) => '<span class="es-col-resize" data-col-role="' + role
       + '" title="拖拽调整列宽，双击恢复默认"></span>';
     const colBar = '<tr class="es-excel-colbar">'
       + '<th class="es-excel-rowhead"></th>'
       + '<th class="es-excel-colhead">' + resizeHandle('scenario') + 'A</th>'
-      + '<th class="es-excel-colhead">' + resizeHandle('current') + 'B</th>'
+      + '<th class="es-excel-colhead">' + resizeHandle('target') + 'B</th>'
+      + '<th class="es-excel-colhead">' + resizeHandle('current') + 'C</th>'
       + model.columns.map((col, ci) => {
         const dLetter = E.colLetterFor(ci, 'd');
         const mLetter = E.colLetterFor(ci, 'm');
@@ -3123,17 +3171,19 @@
       + '</tr>';
 
     // colgroup 精确控宽（table-layout:fixed 下列标行与数据行严格对齐）：
-    // 行号 / 场景(A) / 电流(B) + 每个模型模块的 时长·耗电·备注；宽度来自布局偏好，用户拖拽后持久化
+    // 行号 / 场景(A) / 目标电流(B) / 电流(C) + 每个模型模块的 时长·耗电·备注；宽度来自布局偏好，用户拖拽后持久化
     const colGroup = '<colgroup>' + colEl('rownum', 'es-col-rownum') + colEl('scenario', 'es-col-scenario')
-      + colEl('current', 'es-col-current')
+      + colEl('target', 'es-col-target') + colEl('current', 'es-col-current')
       + model.columns.map(() => colEl('duration', 'es-col-duration') + colEl('mah', 'es-col-mah') + colEl('note', 'es-col-note')).join('')
       + '</colgroup>';
     // 表格显式宽度 = 各列宽之和：fixed 布局下严格按设定列宽渲染、不被内容撑宽，也不撑满容器
-    const tableWidth = layout.colWidths.rownum + layout.colWidths.scenario + layout.colWidths.current
+    const tableWidth = layout.colWidths.rownum + layout.colWidths.scenario + layout.colWidths.target + layout.colWidths.current
       + model.columns.length * (layout.colWidths.duration + layout.colWidths.mah + layout.colWidths.note);
 
     // 两行分组表头：行号 / 场景 / 电流 跨 2 行；每个模型模块 colspan=3（时长 / 耗电量 / 备注）
-    const headTop = '<th class="es-corner es-excel-rowhead" rowspan="2" title="行号（公式地址中的行，如 C2）"></th><th class="es-corner" rowspan="2">场景</th><th rowspan="2">电流 mA</th>'
+    const headTop = '<th class="es-corner es-excel-rowhead" rowspan="2" title="行号（公式地址中的行，如 C2）"></th><th class="es-corner" rowspan="2">场景</th>'
+      + '<th rowspan="2" class="es-target-head" title="目标电流 = 场景电流（只读镜像，地址 B；改电流请到场景电流卡片）">目标电流 mA</th>'
+      + '<th rowspan="2">电流 mA</th>'
       + model.columns.map((col, ci) => {
         const tag = col.kind === 'full' ? '<em class="es-mode-tag">满电</em>' : '';
         const win = col.window ? '<small>' + escapeHtml(col.window) + '</small>' : '';
@@ -3179,37 +3229,42 @@
           + ' title="地址 ' + escapeHtml(nAddr) + '：自由文本或 = 公式，可被其它单元格按 A1 地址引用（文本参与数值运算时记 #VALUE!）" /></td>';
         return dInput + formulaCellHtml(ev, model, mDesc) + noteCell;
       }).join('');
-      const rowHead = '<th class="es-excel-rownum' + (isBlankRow ? ' is-free-row' : '') + '" title="行号（公式地址中的行）"><span class="es-rownum-num">' + E.rowNumberFor(rowIndex) + '</span>'
+      const rowHead = '<th class="es-excel-rownum' + (isBlankRow ? ' is-free-row' : '') + '" title="行号（公式地址中的行）">'
+        + '<span class="es-rownum-inner">'
+        + '<span class="es-rownum-num">' + E.rowNumberFor(rowIndex) + '</span>'
         + '<button type="button" class="es-row-insert-btn" data-es-row-insert="' + escapeHtml(row.id)
         + '" title="在这一行上方插入空白自由行"><span class="material-symbols-outlined">add</span></button>'
         + '<button type="button" class="es-row-del-btn" data-es-row-delete="' + escapeHtml(row.id)
-        + '" title="从当前模型删除该行（不删除场景及其电流数据）"><span class="material-symbols-outlined">close</span></button></th>';
+        + '" title="从当前模型删除该行（不删除场景及其电流数据）"><span class="material-symbols-outlined">close</span></button>'
+        + '</span></th>';
       const nameCell = isBlankRow
         ? '<td class="es-sc-name es-editable-cell" data-es-label-edit="' + escapeHtml(row.id) + '" title="点击编辑自由行标题">' + escapeHtml(scenarioName) + '</td>'
         : '<td class="es-sc-name es-editable-cell" data-es-scenario-edit="' + escapeHtml(row.scenarioId)
           + '" title="点击重命名场景">' + escapeHtml(scenarioName) + '</td>';
       return '<tr data-es-model-row="' + escapeHtml(row.id) + '">' + rowHead
-        + nameCell + currentCellHtml(ev, model, row, rowIndex) + cells + '</tr>';
+        + nameCell + targetCellHtml(ev, model, row) + currentCellHtml(ev, model, row, rowIndex) + cells + '</tr>';
     }).join('');
 
     // tfoot：Total 行逐列求和（C=时长 SUM、D=耗电 SUM、E=备注）；
     // 平均电流 / Typ / Min 三行按需求把「时长 + 耗电」两列合并（C:D / F:G / I:J），A1 地址取左上角 C，E/H/K 备注独立；
-    // 四个汇总行的 A:B 也合并成一格，只展示 A 标签（v59 起汇总行不再有 B 列电流格）
+    // 四个汇总行的 A:B 也合并成一格，只展示 A 标签（C 列电流在汇总行不展示，用占位格保持对齐）
+    // A:B 合并展示标签后，C（电流）在汇总行不展示，补一个占位格保证列对齐
     const footerLabel = (rowKey) => formulaCellHtml(ev, model, { kind: 'footerLabel', rowKey }, 2, 2);
+    const footerGap = '<td class="es-stat-gap" title="汇总行不展示电流"></td>';
     const totalRowHtml = '<tr class="es-stat-row"><th class="es-excel-rownum">' + E.totalRowNumber(model) + '</th>'
-      + footerLabel('total')
+      + footerLabel('total') + footerGap
       + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'td' }, 2)
         + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'tm' }, 2)
         + footerNoteCell(model, col, 'noteTotal')).join('') + '</tr>';
 
     const avgRow = '<tr class="es-stat-row es-stat-auto"><th class="es-excel-rownum">' + E.avgRowNumber(model) + '</th>'
-      + footerLabel('avg')
+      + footerLabel('avg') + footerGap
       + model.columns.map((col) => avgCellHtml(ev, model, col)
         + footerNoteCell(model, col, 'noteAvg')).join('') + '</tr>';
 
     const douRow = (rowKey, valueType, noteType) => '<tr class="es-stat-row"><th class="es-excel-rownum">'
       + E.footerRowNumber(model, rowKey) + '</th>'
-      + footerLabel(rowKey)
+      + footerLabel(rowKey) + footerGap
       + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: valueType }, 2, 2)
         + footerNoteCell(model, col, noteType)).join('') + '</tr>';
 
@@ -3237,14 +3292,14 @@
       + '<div class="es-model-table-wrap"><table class="es-model-table es-excel-grid" data-row-height="' + layout.rowHeight
       + '" style="width:' + tableWidth + 'px; min-width:' + tableWidth + 'px; --es-data-row-h:' + dataRowH
       + 'px; --es-foot-row-h:' + (dataRowH + 4) + 'px">' + colGroup + '<thead>' + colBar + '<tr>' + headTop + '</tr><tr>' + headSub + '</tr></thead>'
-      + '<tbody>' + (body || '<tr><td colspan="' + (3 + model.columns.length * 3) + '" class="es-table-empty">请先在上方「场景电流」中新增场景，或点工具栏「新增场景行」</td></tr>') + '</tbody>'
+      + '<tbody>' + (body || '<tr><td colspan="' + (4 + model.columns.length * 3) + '" class="es-table-empty">请先在上方「场景电流」中新增场景，或点工具栏「新增场景行」</td></tr>') + '</tbody>'
       + '<tfoot>' + totals + '</tfoot></table></div>'
       + '<p class="es-model-tip"><span class="material-symbols-outlined">info</span>'
       + '默认口径对齐云表：场景耗电 = 时长 × 场景电流（0 时长自动得 0）；可使用时长 = 可用容量（Typ × 可放电比例，不硬编码）÷ 总耗电 × 总时长。'
       + '<b>数据格、汇总区每个实际渲染格、场景/自由行标题与列名均可点按自由编辑</b>：数字、文字或 <b>=</b> 公式（回车 / 失焦保存、Esc 取消；文本格原样显示，参与数值计算时记 #VALUE!）；'
-      + 'Total 行逐列求和；平均电流 / Typ / Min 三行按模块把「时长 + 耗电」两列合并（C:D / F:G / I:J），地址取合并区左上角 C；'
-      + '<b>B 电流</b>可在本模型内改写为任意数字 / 文字 / 公式（留空回退场景共享电流，地址 B2、B3… 可被引用），<b>备注列</b>同样可被 A1 引用；'
-      + '工具栏可「插入空白行」做与场景无关的自由行；自由行行号会常驻显示 + / ✕，可继续插入或直接删除；删除行 / 列时 A1 引用按 Excel 规则自动平移，指向被删区域的公式显式报错；<b>fx</b> 为带试算的高级编辑器。</p>';
+      + 'Total 行逐列求和；平均电流 / Typ / Min 三行按模块把「时长 + 耗电」两列合并（D:E / G:H / J:K），地址取合并区左上角 D；'
+      + '<b>B 目标电流</b>为场景电流的只读镜像（地址 B2、B3… 可被公式引用）；<b>C 电流</b>可在本模型内改写为任意数字 / 文字 / 公式（留空回退场景共享电流，地址 C2、C3… 可被引用），<b>备注列</b>同样可被 A1 引用；'
+      + '工具栏可「插入空白行」做与场景无关的自由行；行号列每行常驻「＋ / ✕」两个按钮（＋ 在本行上方插入自由行、✕ 从当前模型删除该行），触屏同样可点；删除行 / 列时 A1 引用按 Excel 规则自动平移，指向被删区域的公式显式报错；<b>fx</b> 为带试算的高级编辑器。</p>';
   }
 
   // ---------- 就地刷新（保留输入焦点） ----------
@@ -3256,6 +3311,13 @@
         const rowId = tr.dataset.esModelRow;
         const row = model.rows.find((r) => r.id === rowId);
         if (!row) return;
+        // B 目标电流镜像列：场景电流变化后就地刷新显示，不重绘整行
+        const targetTd = tr.querySelector('[data-es-target-row]');
+        if (targetTd) {
+          const targetRes = ev.result({ kind: 'target', rowId: rowId });
+          const targetSpan = targetTd.querySelector('.es-target-value');
+          if (targetSpan) targetSpan.textContent = targetRes.ok && !targetRes.empty ? fmt(targetRes.value, 2) : '—';
+        }
         model.columns.forEach((col) => {
           const cDesc = { kind: 'current', rowId: rowId };
           const dDesc = { kind: 'cell', rowId: rowId, colId: col.id, t: 'd' };
@@ -3413,6 +3475,20 @@
 
     // 列宽拖拽 / 双击恢复默认
     bindGridColumnResize();
+
+    // B 目标电流是只读镜像：点击后滚到上方「场景电流」对应行并高亮，说明改值入口在那边
+    root.querySelectorAll('.es-target-cell[data-es-target-row]').forEach((td) => {
+      td.addEventListener('click', () => {
+        const model = activeModel(project);
+        const row = model ? model.rows.find((r) => r.id === td.dataset.esTargetRow) : null;
+        const scId = row ? row.scenarioId : '';
+        const scRow = scId ? root.querySelector('.es-scenario-table tr[data-es-scenario="' + scId + '"]') : null;
+        if (!scRow) return;
+        if (typeof scRow.scrollIntoView === 'function') scRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        scRow.classList.add('is-flash');
+        window.setTimeout(() => scRow.classList.remove('is-flash'), 1400);
+      });
+    });
 
     // 汇总区备注格：纯文本，实时写回 foot 并保存（不解析公式、不整卡重绘以保留焦点）
     root.querySelectorAll('[data-es-foot-note]').forEach((input) => {
@@ -3982,10 +4058,10 @@
       + '<p>A 列为场景 / 自由行标题（数据区按文本处理）；第 1 行表头，场景行从第 2 行开始'
       + (model ? '（本表共 ' + n + ' 个数据行，Total 在第 ' + E.totalRowNumber(model) + ' 行，平均电流在第 ' + E.avgRowNumber(model)
         + ' 行，Typ 在第 ' + E.douRowNumber(model) + ' 行，Min 在第 ' + E.douMinRowNumber(model) + ' 行）' : '') + '；'
-      + 'B=电流（数据区与四个汇总行均可自由编辑，支持 B2 等裸地址引用）；每个对比列占连续三列「时长 / 耗电 / 备注」，'
-      + '数据区 B 列留空时回退场景共享电流；第 1 个对比列为 C（时长）/ D（耗电）/ E（备注），第 2 个为 F / G / H，依次类推；备注列同样可被 A1 引用（文本参与数值运算时记 #VALUE!）。鼠标悬停单元格可见地址。'
-      + '汇总区四个汇总行的 A:B 合并成一格、只展示 A 列标签（不再有 B 列电流格）；Total 行 C/F/I… 放本列时长 SUM、D/G/J… 放本列耗电 SUM、E/H/K… 放备注（备注列为「备注/说明」，与数据行同一种纯文本输入框，不解析公式）；'
-      + '平均电流与 Typ/Min 三行按模块把「时长 + 耗电」两列合并（C:D / F:G / I:J），A1 地址取合并区左上角（如 C15、C16、C17），右侧 D 地址兼容指向同一结果；平均电流留空时界面显示自动值，公式引用该地址也取同一个自动值。</p>'
+      + 'B=目标电流（只读镜像场景电流，支持 B2 等裸地址引用）；C=电流（数据区与四个汇总行均可自由编辑，支持 C2 等裸地址引用）；每个对比列占连续三列「时长 / 耗电 / 备注」，'
+       + '数据区 C 列留空时回退场景共享电流；第 1 个对比列为 D（时长）/ E（耗电）/ F（备注），第 2 个为 G / H / I，依次类推；备注列同样可被 A1 引用（文本参与数值运算时记 #VALUE!）。鼠标悬停单元格可见地址。'
+      + '汇总区四个汇总行的 A:B 合并成一格、只展示 A 列标签，C 列为占位（不展示电流）；Total 行 D/G/J… 放本列时长 SUM、E/H/K… 放本列耗电 SUM、F/I/L… 放备注（备注列为「备注/说明」，与数据行同一种纯文本输入框，不解析公式）；'
+      + '平均电流与 Typ/Min 三行按模块把「时长 + 耗电」两列合并（D:E / G:H / J:K），A1 地址取合并区左上角（如 D15、D16、D17），右侧 E 地址兼容指向同一结果；平均电流留空时界面显示自动值，公式引用该地址也取同一个自动值。</p>'
       + '<h5>二、电池参数（随电池卡片实时联动，不硬编码容量）</h5>'
       + '<p><b>Typ</b> 电池容量 Typ；<b>Min</b> 电池容量 Min；<b>比例</b> 可放电容量比例(0.2C)（空值按 1）；<b>门限</b> 低电量门限（空值按 0）；'
       + '<b>可用容量</b> = Typ × 比例（即云表 239 的来源）；<b>折减容量</b> = Typ × 比例 × (1 − 门限)；<b>关机电压 / Wh / 电压</b>。</p>'
@@ -3993,7 +4069,7 @@
       + '<p><b>时长</b> 本行本列时长；<b>电流</b> 本行场景当前电流（自定义电流优先）；<b>本列时长 / 本列耗电</b> 本列全部场景行（用于 SUM）；<b>总时长 / 总耗电</b> 本列 Total。</p>'
       + '<h5>四、函数与运算</h5>'
       + '<p>四则 <b>+ − * /</b>、幂 <b>^</b>、括号、比较 <b>&gt; &lt; &gt;= &lt;= = &lt;&gt;</b>；'
-      + '函数 <b>SUM / AVG / MIN / MAX / ABS / ROUND / IF / POWER / SQRT</b>（支持中文别名 求和 / 平均值 / 如果 / 四舍五入 等）；区间如 <b>B2:B13</b> 只能用于聚合函数。</p>'
+      + '函数 <b>SUM / AVG / MIN / MAX / ABS / ROUND / IF / POWER / SQRT</b>（支持中文别名 求和 / 平均值 / 如果 / 四舍五入 等）；区间如 <b>C2:C13</b> 只能用于聚合函数。</p>'
       + '<h5>五、默认公式（可改）</h5>'
       + '<p>场景耗电：<b>=IF(时长=0,0,电流*时长)</b>（时长为 0 时直接得 0，缺电流也不会污染汇总）；Total：<b>=SUM(本列时长)</b>、<b>=SUM(本列耗电)</b>；'
       + '普通列可使用时长：<b>=可用容量/总耗电*总时长</b>；满电列：<b>=Typ/总耗电*总时长</b>。</p>'
