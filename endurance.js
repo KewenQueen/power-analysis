@@ -93,22 +93,22 @@
     };
   }
 
-  // v56 起汇总标签落在 A 列自己的物理格里（列宽 150px 左右），默认文案收敛到不截断的长度；
-  // 用户手动改过的标签不会被覆盖，只把仍是旧默认文案的自动换成新默认。
+  // 汇总标签默认文案（v57 定稿口径）：平均电流_mA / 模型续航时长 Typ_H / 模型续航时长 Min_H。
+  // 用户手动改过的标签不会被覆盖，只把仍是历史默认文案的自动换成新默认。
   const LEGACY_FOOTER_LABELS = {
-    total: 'Total（可编辑公式）',
-    avg: '平均电流 mA（自动）',
-    douTyp: '可使用时长（Typ）h',
-    douMin: '可使用时长（Min）h',
+    total: ['Total（可编辑公式）'],
+    avg: ['平均电流 mA（自动）', '平均电流'],
+    douTyp: ['可使用时长（Typ）h', '可用时长 Typ'],
+    douMin: ['可使用时长（Min）h', '可用时长 Min'],
   };
 
   function defaultModelFooter() {
     return {
       labels: {
         total: 'Total',
-        avg: '平均电流',
-        douTyp: '可用时长 Typ',
-        douMin: '可用时长 Min',
+        avg: '平均电流_mA',
+        douTyp: '模型续航时长 Typ_H',
+        douMin: '模型续航时长 Min_H',
       },
       current: { total: '', avg: '', douTyp: '', douMin: '' },
     };
@@ -428,7 +428,7 @@
             } else {
               Object.keys(defaultFooter.labels).forEach((key) => {
                 if (!(key in migrated.footer.labels)) { migrated.footer.labels[key] = defaultFooter.labels[key]; changed = true; }
-                else if (migrated.footer.labels[key] === LEGACY_FOOTER_LABELS[key]) {
+                else if ((LEGACY_FOOTER_LABELS[key] || []).indexOf(migrated.footer.labels[key]) >= 0) {
                   migrated.footer.labels[key] = defaultFooter.labels[key];
                   changed = true;
                 }
@@ -833,10 +833,9 @@
     if (!footRowKey) return '';
     const row = footerRowNumber(model, footRowKey);
     if (desc.t.indexOf('note') === 0) return noteLetterFor(colIndex) + row;
-    // 每个汇总字段都占独立物理列：时长列（C/F/I…）放 td / avg / douTyp / douMin，
-    // 耗电列（D/G/J…）放 tm 与 blankAvg / blankTyp / blankMin，一一对应、不再有合并区。
-    const isMahColumn = desc.t === 'tm' || desc.t.indexOf('blank') === 0;
-    return colLetterFor(colIndex, isMahColumn ? 'm' : 'd') + row;
+    // 平均电流 / Typ / Min 三行把「时长 + 耗电」两列合并，A1 地址取合并区左上角（时长列 C/F/I…）；
+    // 右侧耗电列地址（D/G/J…）由 refToDesc 解析到同一结果，兼容历史公式。
+    return colLetterFor(colIndex, desc.t === 'tm' ? 'm' : 'd') + row;
   }
 
   // ---------- 旧地址（v2）→ 新地址（v3）迁移 ----------
@@ -1084,10 +1083,10 @@
       }
       const footerTypes = {
         [totalRow]: ['td', 'tm', 'noteTotal'],
-        // 纯 Excel 单元格：每个地址就是一个独立物理格，不做合并、不做右侧同值兼容
-        [avgRow]: ['avg', 'blankAvg', 'noteAvg'],
-        [douRow]: ['douTyp', 'blankTyp', 'noteTyp'],
-        [minRow]: ['douMin', 'blankMin', 'noteMin'],
+        // 平均 / Typ / Min 为「时长+耗电」合并区：左上角 C 与右侧 D 都解析到同一个结果
+        [avgRow]: ['avg', 'avg', 'noteAvg'],
+        [douRow]: ['douTyp', 'douTyp', 'noteTyp'],
+        [minRow]: ['douMin', 'douMin', 'noteMin'],
       };
       return footerTypes[ref.row] ? { kind: 'foot', colId: colId, t: footerTypes[ref.row][offset] } : null;
     }
@@ -1175,6 +1174,10 @@
           const refs = [];
           for (let rr = a.row; rr <= b.row; rr += 1) {
             for (let cc = a.col; cc <= b.col; cc += 1) {
+              // 合并区：单点引用右侧仍取同一个值，但区间聚合时右侧按 Excel 合并语义视为空，避免重复计数
+              const mergedRight = (rr === avgRow || rr === douRow || rr === minRow)
+                && cc >= 3 && (cc - 3) % 3 === 1;
+              if (mergedRight) { refs.push(null); continue; }
               const target = refToDesc({ col: cc, row: rr, label: '' });
               if (!target) { refs.push({ type: ET.REF }); continue; }
               const r = evalCell(target, visiting);
@@ -2760,20 +2763,24 @@
     return '<span class="es-cell-value">' + fmt(r.value, 2) + '</span>';
   }
 
-  // 汇总/数据通用格：一个物理列一个格，永不使用 colspan / 合并，保持纯 Excel 表格语义
-  function formulaCellHtml(ev, model, desc, digits) {
+  // 汇总/数据通用格：默认一个物理列一个格；只有平均电流 / Typ / Min 结果格用 colspan=2 合并「时长+耗电」两列
+  function formulaCellHtml(ev, model, desc, digits, colspan) {
     const addr = E.addressOf(model, desc);
     const raw = getRaw(model, desc);
     const r = ev.result(desc);
     const isFormula = String(raw).trim().charAt(0) === '=';
     const showTextError = !r.ok && (isFormula || r.error !== '#VALUE!');
-    const cls = 'es-formula-cell es-editable-cell' + (isFormula ? ' is-formula' : '') + (showTextError ? ' is-error' : '');
-    const text = !r.ok ? (showTextError ? r.error : String(raw).trim()) : (r.empty ? '—' : fmt(r.value, digits === undefined ? 2 : digits));
+    const spanAttr = colspan ? ' colspan="' + colspan + '"' : '';
+    const mergeCls = colspan ? ' es-dou-merge' : '';
+    const cls = 'es-formula-cell es-editable-cell' + mergeCls + (isFormula ? ' is-formula' : '') + (showTextError ? ' is-error' : '');
+    // 汇总区备注列空值显示「备注/说明」轻提示，与数据行保持一致
+    const hintText = (desc.kind === 'foot' && String(desc.t || '').indexOf('note') === 0) ? '备注/说明' : '—';
+    const text = !r.ok ? (showTextError ? r.error : String(raw).trim()) : (r.empty ? hintText : fmt(r.value, digits === undefined ? 2 : digits));
     const addrText = addr ? '地址 ' + addr + '：' : '汇总展示格（无固定 A1 地址）：';
     const errHint = r.ok ? '' : (r.error === '#VALUE!'
       ? '（引用的单元格是文字或空值，或电池容量等参数不是数字）'
       : (r.error === '#DIV/0!' ? '（除数为 0：总时长或总耗电为 0）' : ''));
-    return '<td class="' + cls + '" data-es-cell="' + escapeHtml(descKey(desc))
+    return '<td' + spanAttr + ' class="' + cls + '" data-es-cell="' + escapeHtml(descKey(desc))
       + '" title="' + escapeHtml(addrText + errHint) + '点击直接编辑（数字 / 文字 / = 公式），fx 为高级试算编辑器">'
       + '<span class="es-cell-text' + (showTextError ? ' es-cell-text-error' : '') + '">' + escapeHtml(text) + '</span>'
       + '<button type="button" class="es-fx-btn" data-es-fx="' + escapeHtml(descKey(desc)) + '" title="在公式编辑器中打开 ' + escapeHtml(addr) + '">fx</button></td>';
@@ -2804,7 +2811,7 @@
       + '<button type="button" class="es-fx-btn" data-es-fx="' + escapeHtml(descKey(desc)) + '" title="编辑电流 ' + addr + '">fx</button></td>';
   }
 
-  // 平均电流格：落在时长列（C/F/I…）自己的物理格里，不做任何合并；foot.avg 留空时显示自动值
+  // 平均电流格：按需求把「时长 + 耗电」两列（C:D / F:G / I:J）合并成一格，A1 地址取左上角 C；foot.avg 留空时显示自动值
   function avgCellHtml(ev, model, col) {
     const desc = { kind: 'foot', colId: col.id, t: 'avg' };
     const raw = getRaw(model, desc);
@@ -2813,18 +2820,18 @@
     if (trimmed === '') {
       const auto = ev.stats[col.id] ? ev.stats[col.id].avgCurrent : null;
       const text = auto === null || auto === undefined ? '—' : fmt(auto, 2);
-      return '<td class="es-stat-mah es-formula-cell es-editable-cell es-avg-auto" data-es-cell="'
-        + escapeHtml(descKey(desc)) + '" title="地址 ' + escapeHtml(addr) + '；平均电流（自动 = 总耗电 ÷ 总时长），点击可改写为固定值或公式，留空恢复自动">'
+      return '<td colspan="2" class="es-stat-mah es-dou-merge es-formula-cell es-editable-cell es-avg-auto" data-es-cell="'
+        + escapeHtml(descKey(desc)) + '" title="合并「时长 + 耗电」两列，地址 ' + escapeHtml(addr) + '；平均电流（自动 = 总耗电 ÷ 总时长），点击可改写为固定值或公式，留空恢复自动">'
         + '<span class="es-cell-text es-avg-auto-text">' + escapeHtml(text) + '</span>'
         + '<button type="button" class="es-fx-btn" data-es-fx="' + escapeHtml(descKey(desc)) + '" title="自定义平均电流">fx</button></td>';
     }
     const r = ev.result(desc);
     const isFormula = trimmed.charAt(0) === '=';
     const showTextError = !r.ok && (isFormula || r.error !== '#VALUE!');
-    const cls = 'es-stat-mah es-formula-cell es-editable-cell' + (isFormula ? ' is-formula' : '') + (showTextError ? ' is-error' : '');
+    const cls = 'es-stat-mah es-dou-merge es-formula-cell es-editable-cell' + (isFormula ? ' is-formula' : '') + (showTextError ? ' is-error' : '');
     const text = !r.ok ? (showTextError ? r.error : trimmed) : (r.empty ? '—' : fmt(r.value, 2));
-    return '<td class="' + cls + '" data-es-cell="' + escapeHtml(descKey(desc))
-      + '" title="地址 ' + escapeHtml(addr) + '；自定义平均电流：点击编辑（数字、文字或 = 公式），清空则恢复自动">'
+    return '<td colspan="2" class="' + cls + '" data-es-cell="' + escapeHtml(descKey(desc))
+      + '" title="合并「时长 + 耗电」两列，地址 ' + escapeHtml(addr) + '；自定义平均电流：点击编辑（数字、文字或 = 公式），清空则恢复自动">'
       + '<span class="es-cell-text' + (showTextError ? ' es-cell-text-error' : '') + '">' + escapeHtml(text) + '</span>'
       + '<button type="button" class="es-fx-btn" data-es-fx="' + escapeHtml(descKey(desc)) + '" title="编辑平均电流">fx</button></td>';
   }
@@ -2882,7 +2889,7 @@
         const nLetter = E.noteLetterFor(ci);
         return '<th class="es-mode-head" colspan="3"><div class="es-mode-title"><span class="es-colname-edit es-editable-cell" data-es-colname-edit="'
           + escapeHtml(col.id) + '" title="点击重命名该对比列">' + escapeHtml(col.name) + '</span>' + tag + ops + '</div>'
-          + '<small class="es-col-addr">时长 ' + dLetter + ' / 耗电 ' + mLetter + ' / 备注 ' + nLetter + '</small>' + win + need + note + '</th>';
+          + '<small class="es-col-addr">时长 ' + dLetter + ' / 耗电 ' + mLetter + ' / 备注/说明 ' + nLetter + '</small>' + win + need + note + '</th>';
       }).join('');
     const headSub = model.columns.map(() => '<th class="es-sub">时长 h</th><th class="es-sub">耗电量 mAh</th><th class="es-sub es-note-sub" title="本行备注 / 说明：自由文本或 = 公式，可被按 A1 地址引用">备注/说明</th>').join('');
 
@@ -2925,8 +2932,8 @@
         + nameCell + currentCellHtml(ev, model, row, rowIndex) + cells + '</tr>';
     }).join('');
 
-    // tfoot：四个汇总行，每个字段都落在自己的物理列上（不做任何 colspan 合并，保持纯 Excel 单元格语义）
-    // Total: C=SUM(本列时长) D=SUM(本列耗电) E=备注合计；平均/Typ/Min: C=结果 D=独立可编辑空格 E=备注
+    // tfoot：Total 行逐列求和（C=时长 SUM、D=耗电 SUM、E=备注）；
+    // 平均电流 / Typ / Min 三行按需求把「时长 + 耗电」两列合并（C:D / F:G / I:J），A1 地址取左上角 C，E/H/K 备注独立
     const footerLabel = (rowKey) => formulaCellHtml(ev, model, { kind: 'footerLabel', rowKey }, 2);
     const footerCurrent = (rowKey) => formulaCellHtml(ev, model, { kind: 'footerCurrent', rowKey }, 2);
     const totalRowHtml = '<tr class="es-stat-row"><th class="es-excel-rownum">' + E.totalRowNumber(model) + '</th>'
@@ -2938,20 +2945,17 @@
     const avgRow = '<tr class="es-stat-row es-stat-auto"><th class="es-excel-rownum">' + E.avgRowNumber(model) + '</th>'
       + footerLabel('avg') + footerCurrent('avg')
       + model.columns.map((col) => avgCellHtml(ev, model, col)
-        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'blankAvg' }, 2)
         + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'noteAvg' }, 2)).join('') + '</tr>';
 
-    // 可使用时长 Typ/Min：结果在时长列（C/F/I…），耗电列（D/G/J…）保留一个独立可编辑空格
-    const douRow = (rowKey, valueType, blankType, noteType) => '<tr class="es-stat-row"><th class="es-excel-rownum">'
+    const douRow = (rowKey, valueType, noteType) => '<tr class="es-stat-row"><th class="es-excel-rownum">'
       + E.footerRowNumber(model, rowKey) + '</th>'
       + footerLabel(rowKey) + footerCurrent(rowKey)
-      + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: valueType }, 2)
-        + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: blankType }, 2)
+      + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: valueType }, 2, 2)
         + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: noteType }, 2)).join('') + '</tr>';
 
     const totals = totalRowHtml + avgRow
-      + douRow('douTyp', 'douTyp', 'blankTyp', 'noteTyp')
-      + douRow('douMin', 'douMin', 'blankMin', 'noteMin');
+      + douRow('douTyp', 'douTyp', 'noteTyp')
+      + douRow('douMin', 'douMin', 'noteMin');
 
     const rowHeightBtn = (key, label) => '<button type="button" class="es-mini-btn es-rowh-btn'
       + (layout.rowHeight === key ? ' is-on' : '') + '" data-es-row-h="' + key + '">' + label + '</button>';
@@ -2978,7 +2982,7 @@
       + '<p class="es-model-tip"><span class="material-symbols-outlined">info</span>'
       + '默认口径对齐云表：场景耗电 = 时长 × 场景电流（0 时长自动得 0）；可使用时长 = 可用容量（Typ × 可放电比例，不硬编码）÷ 总耗电 × 总时长。'
       + '<b>数据格、汇总区每个实际渲染格、场景/自由行标题与列名均可点按自由编辑</b>：数字、文字或 <b>=</b> 公式（回车 / 失焦保存、Esc 取消；文本格原样显示，参与数值计算时记 #VALUE!）；'
-      + 'Total 行逐列求和；平均电流 / Typ / Min 落在本模块时长列（C/F/I…），耗电列（D/G/J…）是独立可编辑空格，不存在任何合并单元格；'
+      + 'Total 行逐列求和；平均电流 / Typ / Min 三行按模块把「时长 + 耗电」两列合并（C:D / F:G / I:J），地址取合并区左上角 C；'
       + '<b>B 电流</b>可在本模型内改写为任意数字 / 文字 / 公式（留空回退场景共享电流，地址 B2、B3… 可被引用），<b>备注列</b>同样可被 A1 引用；'
       + '工具栏可「插入空白行」做与场景无关的自由行；自由行行号会常驻显示 + / ✕，可继续插入或直接删除；删除行 / 列时 A1 引用按 Excel 规则自动平移，指向被删区域的公式显式报错；<b>fx</b> 为带试算的高级编辑器。</p>';
   }
@@ -3705,8 +3709,8 @@
         + ' 行，Typ 在第 ' + E.douRowNumber(model) + ' 行，Min 在第 ' + E.douMinRowNumber(model) + ' 行）' : '') + '；'
       + 'B=电流（数据区与四个汇总行均可自由编辑，支持 B2 等裸地址引用）；每个对比列占连续三列「时长 / 耗电 / 备注」，'
       + '数据区 B 列留空时回退场景共享电流；第 1 个对比列为 C（时长）/ D（耗电）/ E（备注），第 2 个为 F / G / H，依次类推；备注列同样可被 A1 引用（文本参与数值运算时记 #VALUE!）。鼠标悬停单元格可见地址。'
-      + '汇总区 A/B 为标签与电流；每个汇总行都是纯 Excel 单元格、没有任何合并：Total 行 C/F/I… 放本列时长 SUM、D/G/J… 放本列耗电 SUM、E/H/K… 放备注；'
-      + '平均电流与 Typ/Min 的结果放在本模块时长列（C/F/I…，例如 C15、C16、C17），紧邻的耗电列（D/G/J…）是独立可编辑空格，可自行写值或公式。平均电流留空时界面显示自动值，公式引用该地址也取同一个自动值。</p>'
+      + '汇总区 A/B 为标签与电流；Total 行 C/F/I… 放本列时长 SUM、D/G/J… 放本列耗电 SUM、E/H/K… 放备注（备注列为「备注/说明」）；'
+      + '平均电流与 Typ/Min 三行按模块把「时长 + 耗电」两列合并（C:D / F:G / I:J），A1 地址取合并区左上角（如 C15、C16、C17），右侧 D 地址兼容指向同一结果；平均电流留空时界面显示自动值，公式引用该地址也取同一个自动值。</p>'
       + '<h5>二、电池参数（随电池卡片实时联动，不硬编码容量）</h5>'
       + '<p><b>Typ</b> 电池容量 Typ；<b>Min</b> 电池容量 Min；<b>比例</b> 可放电容量比例(0.2C)（空值按 1）；<b>门限</b> 低电量门限（空值按 0）；'
       + '<b>可用容量</b> = Typ × 比例（即云表 239 的来源）；<b>折减容量</b> = Typ × 比例 × (1 − 门限)；<b>关机电压 / Wh / 电压</b>。</p>'
