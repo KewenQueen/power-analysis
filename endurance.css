@@ -416,6 +416,7 @@
   margin-top: .05rem;
 }
 .es-discharge-tip b { color: #4f46e5; font-weight: 800; }
+.es-hint-text { flex: 1 1 auto; min-width: 0; }
 .es-discharge-table { min-width: 460px; }
 .es-discharge-table th { white-space: nowrap; }
 .es-dt-input {

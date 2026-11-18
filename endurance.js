@@ -2017,26 +2017,28 @@
     const matrix = b.dischargeMatrix || { rows: [] };
     const curve = dischargeCurve(b);
     const rowCount = (matrix.rows || []).length;
-    const base = '<span class="material-symbols-outlined">';
+    const hint = (icon, html) => '<span class="material-symbols-outlined">' + icon
+      + '</span><span class="es-hint-text">' + html + '</span>';
     if (!curve.length) {
-      return base + 'info</span>尚未维护查询表：可导入电池规格书自动识别，或点「新增一行」按温度 / 放电倍率维护各截止电压的可放电容量。';
+      return hint('info', '尚未维护查询表：可导入电池规格书自动识别，或点「新增一行」按温度 / 放电倍率维护各截止电压的可放电容量。');
     }
     if (reason === 'no-shutdown-voltage') {
-      return base + 'hourglass_top</span>已维护 ' + rowCount + ' 组温度 / 倍率数据、' + curve.length
-        + ' 个截止电压；填写「项目配置 → 关机电压」后将自动插值计算可放电容量比例(0.2C)。';
+      return hint('hourglass_top', '已维护 ' + rowCount + ' 组温度 / 倍率数据、' + curve.length
+        + ' 个截止电压；填写「项目配置 → 关机电压」后将自动插值计算可放电容量比例(0.2C)。');
     }
     const d = derived || E.deriveDischargeRatio(project);
     if (reason === 'no-cap-typ' || d.reason === 'no-cap-typ') {
-      return base + 'edit_note</span>关机电压 <b>' + escapeHtml(cfg.shutdownVoltage) + ' V</b> → 可放电容量 <b>' + fmt(d.capacityMah, 2)
-        + ' mAh</b>；填写电池容量 Typ 后将自动换算并回填比例。';
+      return hint('edit_note', '关机电压 <b>' + escapeHtml(cfg.shutdownVoltage) + ' V</b> → 可放电容量 <b>' + fmt(d.capacityMah, 2)
+        + ' mAh</b>；填写电池容量 Typ 后将自动换算并回填比例。');
     }
     if (reason === 'ratio-overflow') {
-      return base + 'warning</span>关机电压 <b>' + escapeHtml(cfg.shutdownVoltage) + ' V</b> → 可放电容量 <b>' + fmt(d.capacityMah, 2)
-        + ' mAh</b>，占 Typ 容量 <b>' + fmt(d.ratio * 100, 2) + '%</b>，超过 100%，未自动回填；请检查查询表容量或 Typ 容量是否填写正确。';
+      return hint('warning', '关机电压 <b>' + escapeHtml(cfg.shutdownVoltage) + ' V</b> → 可放电容量 <b>' + fmt(d.capacityMah, 2)
+        + ' mAh</b>，占 Typ 容量 <b>' + fmt(d.ratio * 100, 2) + '%</b>，超过 100%，未自动回填；请检查查询表容量或 Typ 容量是否填写正确。');
     }
-    return base + 'check_circle</span>关机电压 <b>' + escapeHtml(cfg.shutdownVoltage) + ' V</b> → 可放电容量 <b>' + fmt(d.capacityMah, 2)
-      + ' mAh</b>（线性插值）→ 占 Typ 容量 <b>' + fmt(d.ratio * 100, 2) + '%</b>，已自动回填「可放电容量比例(0.2C)」。';
+    return hint('check_circle', '关机电压 <b>' + escapeHtml(cfg.shutdownVoltage) + ' V</b> → 可放电容量 <b>' + fmt(d.capacityMah, 2)
+      + ' mAh</b>（线性插值）→ 占 Typ 容量 <b>' + fmt(d.ratio * 100, 2) + '%</b>，已自动回填「可放电容量比例(0.2C)」。');
   }
+
 
   function renderDischargeCard(project) {
     const b = project.battery || {};
@@ -2085,7 +2087,7 @@
       + '<button type="button" class="template-btn template-btn-sm" data-es-dt-add-v><span class="material-symbols-outlined text-sm">add_column_right</span>新增电压列</button>'
       + '<button type="button" class="template-btn template-btn-sm template-btn-danger" data-es-dt-clear><span class="material-symbols-outlined text-sm">delete_sweep</span>清空</button>'
       + '</div></div>'
-      + '<p class="es-discharge-tip">按电池规格书格式维护：每行一个「温度 + 放电倍率」，各截止电压列填<b>从满电放至该电压的累计可放电容量（mAh）</b>，格内小字为占 Typ 容量比例。可放电比例按 0.2C 行插值，支持 .xlsx / .xls / .csv 导入。</p>'
+      + '<p class="es-discharge-tip"><span class="es-hint-text">按电池规格书格式维护：每行一个「温度 + 放电倍率」，各截止电压列填<b>从满电放至该电压的累计可放电容量（mAh）</b>，格内小字为占 Typ 容量比例。可放电比例按 0.2C 行插值，支持 .xlsx / .xls / .csv 导入。</span></p>'
       + '<div class="es-table-wrap"><table class="es-table es-discharge-table es-matrix-table"><thead>'
       + '<tr><th rowspan="2">温度</th><th rowspan="2">放电倍率</th>'
       + '<th colspan="' + voltages.length + '">截止电压（可放电 mAh / 占 Typ）</th><th rowspan="2" style="width:56px">操作</th></tr>'
