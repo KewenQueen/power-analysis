@@ -2764,8 +2764,8 @@
     const text = !r.ok ? (showTextError ? r.error : String(raw).trim()) : (r.empty ? '—' : fmt(r.value, digits === undefined ? 2 : digits));
     const addrText = addr ? '地址 ' + addr + '：' : '汇总展示格（无固定 A1 地址）：';
     const errHint = r.ok ? '' : (r.error === '#VALUE!'
-      ? '（电池 Typ/Min 容量等参数为空或非数字）'
-      : (r.error === '#DIV/0!' ? '（总耗电为 0，请先填写场景时长）' : ''));
+      ? '（引用的单元格是文字或空值，或电池容量等参数不是数字）'
+      : (r.error === '#DIV/0!' ? '（除数为 0：总时长或总耗电为 0）' : ''));
     return '<td' + spanAttr + ' class="' + cls + '" data-es-cell="' + escapeHtml(descKey(desc))
       + '" title="' + escapeHtml(addrText + errHint) + '点击直接编辑（数字 / 文字 / = 公式），fx 为高级试算编辑器">'
       + '<span class="es-cell-text' + (showTextError ? ' es-cell-text-error' : '') + '">' + escapeHtml(text) + '</span>'
