@@ -2944,23 +2944,23 @@
     }).join('');
 
     // tfoot：Total 行逐列求和（C=时长 SUM、D=耗电 SUM、E=备注）；
-    // 平均电流 / Typ / Min 三行按需求把「时长 + 耗电」两列合并（C:D / F:G / I:J），A1 地址取左上角 C，E/H/K 备注独立
-    const footerLabel = (rowKey) => formulaCellHtml(ev, model, { kind: 'footerLabel', rowKey }, 2);
-    const footerCurrent = (rowKey) => formulaCellHtml(ev, model, { kind: 'footerCurrent', rowKey }, 2);
+    // 平均电流 / Typ / Min 三行按需求把「时长 + 耗电」两列合并（C:D / F:G / I:J），A1 地址取左上角 C，E/H/K 备注独立；
+    // 四个汇总行的 A:B 也合并成一格，只展示 A 标签（v59 起汇总行不再有 B 列电流格）
+    const footerLabel = (rowKey) => formulaCellHtml(ev, model, { kind: 'footerLabel', rowKey }, 2, 2);
     const totalRowHtml = '<tr class="es-stat-row"><th class="es-excel-rownum">' + E.totalRowNumber(model) + '</th>'
-      + footerLabel('total') + footerCurrent('total')
+      + footerLabel('total')
       + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'td' }, 2)
         + formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: 'tm' }, 2)
         + footerNoteCell(model, col, 'noteTotal')).join('') + '</tr>';
 
     const avgRow = '<tr class="es-stat-row es-stat-auto"><th class="es-excel-rownum">' + E.avgRowNumber(model) + '</th>'
-      + footerLabel('avg') + footerCurrent('avg')
+      + footerLabel('avg')
       + model.columns.map((col) => avgCellHtml(ev, model, col)
         + footerNoteCell(model, col, 'noteAvg')).join('') + '</tr>';
 
     const douRow = (rowKey, valueType, noteType) => '<tr class="es-stat-row"><th class="es-excel-rownum">'
       + E.footerRowNumber(model, rowKey) + '</th>'
-      + footerLabel(rowKey) + footerCurrent(rowKey)
+      + footerLabel(rowKey)
       + model.columns.map((col) => formulaCellHtml(ev, model, { kind: 'foot', colId: col.id, t: valueType }, 2, 2)
         + footerNoteCell(model, col, noteType)).join('') + '</tr>';
 
@@ -3735,7 +3735,7 @@
         + ' 行，Typ 在第 ' + E.douRowNumber(model) + ' 行，Min 在第 ' + E.douMinRowNumber(model) + ' 行）' : '') + '；'
       + 'B=电流（数据区与四个汇总行均可自由编辑，支持 B2 等裸地址引用）；每个对比列占连续三列「时长 / 耗电 / 备注」，'
       + '数据区 B 列留空时回退场景共享电流；第 1 个对比列为 C（时长）/ D（耗电）/ E（备注），第 2 个为 F / G / H，依次类推；备注列同样可被 A1 引用（文本参与数值运算时记 #VALUE!）。鼠标悬停单元格可见地址。'
-      + '汇总区 A/B 为标签与电流；Total 行 C/F/I… 放本列时长 SUM、D/G/J… 放本列耗电 SUM、E/H/K… 放备注（备注列为「备注/说明」，与数据行同一种纯文本输入框，不解析公式）；'
+      + '汇总区四个汇总行的 A:B 合并成一格、只展示 A 列标签（不再有 B 列电流格）；Total 行 C/F/I… 放本列时长 SUM、D/G/J… 放本列耗电 SUM、E/H/K… 放备注（备注列为「备注/说明」，与数据行同一种纯文本输入框，不解析公式）；'
       + '平均电流与 Typ/Min 三行按模块把「时长 + 耗电」两列合并（C:D / F:G / I:J），A1 地址取合并区左上角（如 C15、C16、C17），右侧 D 地址兼容指向同一结果；平均电流留空时界面显示自动值，公式引用该地址也取同一个自动值。</p>'
       + '<h5>二、电池参数（随电池卡片实时联动，不硬编码容量）</h5>'
       + '<p><b>Typ</b> 电池容量 Typ；<b>Min</b> 电池容量 Min；<b>比例</b> 可放电容量比例(0.2C)（空值按 1）；<b>门限</b> 低电量门限（空值按 0）；'
